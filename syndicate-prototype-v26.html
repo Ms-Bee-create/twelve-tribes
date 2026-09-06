@@ -585,6 +585,7 @@
 
   .room-body.theme-campfire { background: radial-gradient(ellipse at 50% 0%, rgba(178,58,70,0.14), rgba(15,12,9,0.85) 70%); }
   .room-body.theme-market { background: radial-gradient(ellipse at 50% 0%, rgba(201,162,75,0.16), rgba(15,12,9,0.85) 70%); }
+  .room-body.theme-trial { background: radial-gradient(ellipse at 50% 0%, rgba(140,60,55,0.16), rgba(15,12,9,0.85) 70%); }
   .chat-panel { max-height: 340px; display: flex; flex-direction: column; gap: 2px; }
   .chat-message { padding: 6px 0; border-bottom: 1px solid var(--stone-line); }
   .chat-message:last-child { border-bottom: none; }
@@ -1191,6 +1192,17 @@
       <div id="convenienceList"></div>
     </div>
 
+    <div class="room-body theme-trial" id="room-trial" style="display:none">
+      <p class="room-intro">Climb a ladder of guards — no march, no travel, just pick a hero and fight. Keep climbing until you lose or clear the top. A limited number of attempts refresh once a day.</p>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name" id="trialStageName">Stage 1</div>
+          <div class="item-meta" id="trialMeta">3 attempts remaining today.</div>
+        </div>
+        <button class="gold-btn" id="trialFightBtn">Fight</button>
+      </div>
+    </div>
+
     <div class="room-body theme-help" id="room-settings" style="display:none">
       <p class="room-intro">How the game looks, notifies you, and remembers who you are.</p>
 
@@ -1314,6 +1326,12 @@
   const EVENT_DURATION_MS = 25 * 60 * 1000; // one "weekly push" cycle, demo speed
   const DAILY_COOLDOWN_MS = 90 * 1000;     // demo speed daily check-in
   const GOVERNOR_CYCLE_MS = 8 * 60 * 1000; // stands in for "every 3 days," demo speed
+  // The Trial — modeled on Mafia City's real Prison Break: climb a ladder of
+  // guards, no march/travel, a real daily cap on attempts. Demo-speed reset,
+  // same convention as every other "daily" timer above.
+  const TRIAL_STAGES = 12;
+  const TRIAL_DAILY_ATTEMPTS = 3;
+  const TRIAL_RESET_MS = 90 * 1000;
 
   const state = {
     level: 1, xp: 0, xpToLevel: 55,
@@ -1330,6 +1348,10 @@
     hospitalLevel: 1,
     warehouseLevel: 1,
     dailyReadyAt: 0,          // performance.now() timestamp; 0 = ready now
+    // stage: where the CURRENT climb stands (resets to 1 after a loss or a
+    // full clear). attemptsUsed/resetAt track the daily cap, same pattern as
+    // dailyReadyAt above.
+    trial: { attemptsUsed: 0, resetAt: 0, stage: 1 },
     resources: { lumber: 0, food: 0, water: 0, fuel: 0 },
     garageLevel: 1,
     researchLevel: 1,
@@ -2222,6 +2244,74 @@
     return Math.max(0, lossPct - heroGearBonus(hero, 'ward'));
   }
 
+  // The Trial — an instant, no-march PvE ladder (modeled on Mafia City's
+  // real Prison Break). Guard power always scales off the player's OWN
+  // current powerRating(), same live-scaling idea as Boss Mansions, so it's
+  // never a stale fixed number: 0.5x at stage 1 climbing to 2x at the top.
+  function trialStagePower(stage) {
+    return Math.round(powerRating() * (0.5 + (stage - 1) * 1.5 / (TRIAL_STAGES - 1)));
+  }
+  function trialStageComposition() { return { enforcer: 1 / 3, gunner: 1 / 3, driver: 1 / 3 }; }
+  // Stages are banded evenly across the 3 Forge gears (4 stages each at
+  // TRIAL_STAGES=12) — same "one clean source" rule as syndicate icons, just
+  // applied to stage ranges instead of icons, per her explicit ask that
+  // Trial materials shouldn't be one flat undifferentiated pool.
+  function trialStageGear(stage) {
+    const band = Math.floor((stage - 1) / (TRIAL_STAGES / GEAR_TYPES.length));
+    return GEAR_TYPES[Math.min(GEAR_TYPES.length - 1, band)];
+  }
+  const TRIAL_RESOURCE_CYCLE = ['lumber', 'food', 'water', 'fuel'];
+  function trialStageRewards(stage) {
+    const silver = Math.round(40 * Math.pow(stage, 1.6));
+    const resKey = TRIAL_RESOURCE_CYCLE[(stage - 1) % TRIAL_RESOURCE_CYCLE.length];
+    const resAmt = Math.round(15 * Math.pow(stage, 1.4));
+    return { silver, resKey, resAmt };
+  }
+  // 15% at stage 1 climbing to 55% at the top stage, drawn from ONLY that
+  // stage-band's gear materials (never the full pool) — same reasoning as
+  // the syndicate fix above.
+  function rollTrialMaterial(stage) {
+    const chance = 0.15 + (stage - 1) * 0.4 / (TRIAL_STAGES - 1);
+    if (Math.random() > chance) return null;
+    const pool = trialStageGear(stage).materials;
+    const item = pool[Math.floor(Math.random() * pool.length)];
+    inventory[item] = (inventory[item] || 0) + 1;
+    return item;
+  }
+  function trialAttemptsRemaining() { return Math.max(0, TRIAL_DAILY_ATTEMPTS - state.trial.attemptsUsed); }
+  function resolveTrialStage(formation, hero) {
+    const stage = state.trial.stage;
+    const power = trialStagePower(stage);
+    const ratio = (effectiveAttack(formation, trialStageComposition()) * heroSkillMultiplier(hero)) / power;
+    const result = resolveCombatBand(ratio);
+    const lost = applyFormationLosses(formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
+    const lossTag = lost > 0 ? ` ${lost} lost.` : '';
+    if (result.won) {
+      const reward = trialStageRewards(stage);
+      state.coins += reward.silver;
+      state.resources[reward.resKey] = Math.min(resourceCap(), state.resources[reward.resKey] + reward.resAmt);
+      gainXp(Math.round(power * 0.15));
+      const mat = rollTrialMaterial(stage);
+      const matTag = mat ? ` Found: ${mat}.` : '';
+      const cleared = stage >= TRIAL_STAGES;
+      addLog(`Cleared Trial Stage ${stage} — ${reward.silver} silver, ${reward.resAmt} ${RESOURCE_LABELS[reward.resKey] || reward.resKey}.${matTag}${lossTag}`, 'win', 'combat');
+      if (cleared) {
+        addLog(`Cleared the whole Trial ladder! Starting back at Stage 1.`, 'win', 'combat');
+        state.trial.stage = 1;
+        state.trial.attemptsUsed += 1;
+        if (trialAttemptsRemaining() <= 0) state.trial.resetAt = performance.now() + TRIAL_RESET_MS;
+      } else {
+        state.trial.stage += 1;
+      }
+    } else {
+      addLog(`Lost at Trial Stage ${stage}.${lossTag} Run over — back to Stage 1.`, 'lose', 'combat');
+      state.trial.stage = 1;
+      state.trial.attemptsUsed += 1;
+      if (trialAttemptsRemaining() <= 0) state.trial.resetAt = performance.now() + TRIAL_RESET_MS;
+    }
+    render();
+  }
+
   function troopTrainMs(t) { return Math.round(Math.max(135000, 330000 - state.barracksLevel * 22500) * (1 + (t.tierMult - 1) * 0.4) * (1 - researchBonusPct('train_speed'))); }
   function troopTrainResourceCost(t) { return { food: Math.round(15 * t.tierMult) }; }
 
@@ -2480,7 +2570,10 @@
   // Convenience items — each a different one-off effect rather than a
   // reusable data shape, so each gets its own small buy handler in
   // renderMarketRoom() instead of a generic array loop like the others above.
-  const GEAR_BUNDLE_PRICE = 300;
+  // Deliberately steep — an "impatience tax," not a cheaper alternative to
+  // actually earning materials from syndicates/the Trial. Was 300, which
+  // undercut any real reason to fight for them.
+  const GEAR_BUNDLE_PRICE = 3000;
   const GEAR_BUNDLE_COUNT = 2;
 
   // ---- Resource-shortage guidance: when a build/train/research button is
@@ -3797,7 +3890,7 @@
   }
 
   const mansionModal = document.getElementById('mansionModal');
-  const ROOM_IDS = ['foyer','barracks','armory','events','inventory','heroes','hospital','warehouse','garage','research','fieldlumber','fieldgrain','fieldwater','reports','help','campfire','market','settings'];
+  const ROOM_IDS = ['foyer','barracks','armory','events','inventory','heroes','hospital','warehouse','garage','research','fieldlumber','fieldgrain','fieldwater','reports','help','campfire','market','settings','trial'];
 
   // The Camp scene — a small fixed layout (logical 400x280 space, scaled to
   // fit the canvas) with one drawn structure per room. Tapping a structure
@@ -3821,6 +3914,7 @@
     { room: 'fieldwater',  label: 'The Cistern',         icon: '💧', x: 255, y: 330, w: 48, h: 28, roof: '#3f5a6a', body: '#2a3a44' },
     { room: 'reports',     label: 'Watchtower',          icon: '🗼', x: 355, y: 325, w: 44, h: 34, roof: '#5a5348', body: '#3a352c' },
     { room: 'market',      label: 'The Market',          icon: '🛒', x: 45,  y: 110, w: 38, h: 24, roof: '#4a3f2a', body: '#2e2818' },
+    { room: 'trial',       label: 'The Trial',           icon: '⚔️', x: 255, y: 110, w: 40, h: 26, roof: '#5a3f3a', body: '#3a2620' },
   ];
   const CAMP_W = 400, CAMP_H = 370;
   const campCanvas = document.getElementById('campCanvas');
@@ -5382,6 +5476,7 @@
     renderResearchRoom();
     FIELD_TYPES.forEach(renderFieldRoom);
     renderReportsRoom();
+    renderTrialRoom();
   }
 
   // Tier is the top-level tab here (opposite grouping from the deployment
@@ -6066,7 +6161,7 @@
 
     const gearCard = document.createElement('div');
     gearCard.className = 'item-card';
-    gearCard.innerHTML = `<div class="item-info"><div class="item-name">Gear Material Bundle</div><div class="item-meta">${GEAR_BUNDLE_COUNT} random Forge crafting materials — for players who'd rather not grind raids for them.</div></div>`;
+    gearCard.innerHTML = `<div class="item-info"><div class="item-name">Gear Material Bundle</div><div class="item-meta">${GEAR_BUNDLE_COUNT} random Forge crafting materials — for players who'd rather not grind syndicates or the Trial for them.</div></div>`;
     const gearBtn = document.createElement('button');
     gearBtn.className = 'gold-btn';
     gearBtn.textContent = `Buy — ${GEAR_BUNDLE_PRICE} silver`;
@@ -6268,6 +6363,29 @@
         }
         lootList.appendChild(row);
       });
+    }
+  }
+
+  function renderTrialRoom() {
+    if (state.trial.attemptsUsed > 0 && state.trial.resetAt > 0 && performance.now() >= state.trial.resetAt) {
+      state.trial.attemptsUsed = 0;
+      state.trial.resetAt = 0;
+    }
+    const stage = state.trial.stage;
+    const gear = trialStageGear(stage);
+    document.getElementById('trialStageName').textContent = `Stage ${stage} of ${TRIAL_STAGES}`;
+    const fightBtn = document.getElementById('trialFightBtn');
+    const remain = trialAttemptsRemaining();
+    if (remain <= 0) {
+      const cooldown = Math.max(0, state.trial.resetAt - performance.now());
+      document.getElementById('trialMeta').textContent = `No attempts left — resets in ${fmtSecs(cooldown)}.`;
+      fightBtn.textContent = 'No Attempts Left';
+      fightBtn.disabled = true;
+    } else {
+      document.getElementById('trialMeta').textContent =
+        `${remain}/${TRIAL_DAILY_ATTEMPTS} attempts left today. This stage drops materials for ${gear.label}.`;
+      fightBtn.textContent = `Fight Stage ${stage}`;
+      fightBtn.disabled = false;
     }
   }
 
@@ -6622,6 +6740,15 @@
     render();
   });
 
+  document.getElementById('trialFightBtn').addEventListener('click', () => {
+    if (trialAttemptsRemaining() <= 0) return;
+    const stage = state.trial.stage;
+    const pseudoTarget = { power: trialStagePower(stage), composition: trialStageComposition(), isBoss: false };
+    openFormationModal(selectedHero(), `The Trial — Stage ${stage}`, (formation, hero) => {
+      resolveTrialStage(formation, hero);
+    }, { oddsTarget: pseudoTarget, allowReinforcement: true });
+  });
+
   setInterval(() => {
     let changed = false;
     heroes.forEach(h => { if (h.stamina < heroMaxStamina(h)) { h.stamina += 1; changed = true; } });
@@ -6898,6 +7025,7 @@
         formationPresets: state.formationPresets.map(p => p ? { ...p } : null),
         settings: { ...state.settings },
         dailyRemainMs: msRemaining(state.dailyReadyAt),
+        trial: { attemptsUsed: state.trial.attemptsUsed, stage: state.trial.stage, resetRemainMs: msRemaining(state.trial.resetAt) },
         resources: { ...state.resources },
         eventPoints: state.eventPoints,
         eventRemainMs: msRemaining(state.eventEndsAt),
@@ -7006,6 +7134,9 @@
       formationPresets: (save.state.formationPresets || [null, null, null, null, null]).map(p => p ? { ...p } : null),
       settings: { autoOpenCamp: true, reduceMotion: false, notifyBuildDone: false, notifyRaided: false, soundEnabled: false, ...(save.state.settings || {}) },
       dailyReadyAt: performance.now() + catchUpMs(save.state.dailyRemainMs),
+      trial: save.state.trial
+        ? { attemptsUsed: save.state.trial.attemptsUsed || 0, stage: save.state.trial.stage || 1, resetAt: performance.now() + catchUpMs(save.state.trial.resetRemainMs) }
+        : { attemptsUsed: 0, stage: 1, resetAt: 0 },
       eventPoints: save.state.eventPoints,
       eventEndsAt: performance.now() + catchUpMs(save.state.eventRemainMs),
       governorHeld: !!save.state.governorHeld,
