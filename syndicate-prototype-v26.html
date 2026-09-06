@@ -6863,8 +6863,22 @@
     });
     Object.assign(state.resources, save.state.resources);
     if (state.resources.fuel == null) state.resources.fuel = 0;
-    if (save.state.baseX != null) BASE.x = save.state.baseX;
-    if (save.state.baseY != null) BASE.y = save.state.baseY;
+    // Once signed in to the shared world, your position there is a real
+    // multiplayer fact (randomized away from every other player at account
+    // setup, and visible on everyone else's map) — importing a sync code
+    // shouldn't be able to silently relocate you and strand your old spot
+    // as an orphaned "ghost base" nobody's occupying anymore, which is
+    // exactly what happened when a save (e.g. shared as a head-start
+    // between family accounts) carried a DIFFERENT baseX/baseY than
+    // whatever this account was already assigned. Only trust a save's own
+    // base position while playing solo, before any multiplayer position
+    // has ever been established (mpSession is null both on a normal solo
+    // boot, before mpCheckSessionAndProfile has run, AND for anyone who
+    // never signs in at all).
+    if (!mpSession) {
+      if (save.state.baseX != null) BASE.x = save.state.baseX;
+      if (save.state.baseY != null) BASE.y = save.state.baseY;
+    }
 
     // Oil Press / field-plot production are the same "continuous tick, no
     // end-timestamp" shape as stamina/farming above — credit the real time
@@ -7088,6 +7102,11 @@
       const save = JSON.parse(json);
       applySavePayload(save);
       saveGame();
+      // an import can change power/troops/hero levels even though position
+      // itself is now protected (see applySavePayload) — keep the shared
+      // row honest about everything else right away rather than waiting
+      // for the next regular sync tick
+      if (mpSession) mpPushProfile();
       return true;
     } catch (e) {
       return false;
