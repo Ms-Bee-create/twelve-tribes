@@ -2544,6 +2544,17 @@
     return 0.85 + within * 0.3; // 0.85x at the start of an era, 1.15x by the end
   }
 
+  // Other real players already showed their name above their base — your
+  // own never did. Only meaningful once signed in (solo play has no real
+  // "display name" concept), matching exactly when a name is available.
+  function drawOwnNameLabel(x, yAboveRoof) {
+    if (!showLabels || !mpSession || !mpProfile) return;
+    ctx.fillStyle = '#ede6db';
+    ctx.font = '600 11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(mpProfile.display_name, x, yAboveRoof);
+  }
+
   function drawComputerMansion(x, y, lvl) {
     const era = computerEraForLevel(lvl);
     const s = computerScale(lvl);
@@ -2563,6 +2574,7 @@
       ctx.textAlign = 'center';
       ctx.fillText(era.label, x, y + 34 * s);
     }
+    drawOwnNameLabel(x, y + 48 * s);
   }
 
   // All-in-one beige box, built-in screen — Mac 128K and Plus share this
@@ -2791,6 +2803,7 @@
     }
 
     ctx.fillText(`CAMP Lv${lvl} (click)`, x, y + centerH / 2 + 24);
+    drawOwnNameLabel(x, y + centerH / 2 + 52);
   }
 
   function drawHub(h) {
