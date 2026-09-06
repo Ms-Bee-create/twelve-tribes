@@ -2493,7 +2493,170 @@
     return Math.min(100, Math.max(0, (elapsed / total) * 100));
   }
 
+  // A single hard-coded account gets an alternate Camp visual: a computer
+  // that evolves through real Mac/Windows history as the Camp levels up,
+  // instead of the usual estate. Scoped to just this one sign-in (per
+  // explicit request) rather than a general cosmetic system, since no
+  // per-account theme picker exists anywhere else in the game yet.
+  const SON_ACCOUNT_EMAIL = 'achristy236@gmail.com';
+  function isSonAccount() { return !!(mpSession && mpSession.user && mpSession.user.email === SON_ACCOUNT_EMAIL); }
+  const COMPUTER_ERA_STAGES = [
+    { minLevel: 1,  maxLevel: 10,  key: 'mac128k',   label: 'Macintosh 128K' },
+    { minLevel: 11, maxLevel: 20,  key: 'macplus',   label: 'Macintosh Plus' },
+    { minLevel: 21, maxLevel: 30,  key: 'macse',     label: 'Macintosh SE' },
+    { minLevel: 31, maxLevel: 40,  key: 'imacg3',    label: 'iMac G3' },
+    { minLevel: 41, maxLevel: 55,  key: 'win95',     label: 'Windows 95 Desktop' },
+    { minLevel: 56, maxLevel: 70,  key: 'winxp',     label: 'Windows XP Tower' },
+    { minLevel: 71, maxLevel: 85,  key: 'gamingpc',  label: 'Gaming PC' },
+    { minLevel: 86, maxLevel: 100, key: 'alienware', label: 'Alienware Gaming Laptop' },
+  ];
+  function computerEraForLevel(lvl) {
+    return COMPUTER_ERA_STAGES.find(s => lvl >= s.minLevel && lvl <= s.maxLevel) || COMPUTER_ERA_STAGES[COMPUTER_ERA_STAGES.length - 1];
+  }
+  // modest, capped growth within an era rather than the estate's unbounded
+  // per-level formula — a desktop computer shouldn't balloon to the size of
+  // a manor by level 100
+  function computerScale(lvl) {
+    const era = computerEraForLevel(lvl);
+    const span = Math.max(1, era.maxLevel - era.minLevel);
+    const within = (lvl - era.minLevel) / span;
+    return 0.85 + within * 0.3; // 0.85x at the start of an era, 1.15x by the end
+  }
+
+  function drawComputerMansion(x, y, lvl) {
+    const era = computerEraForLevel(lvl);
+    const s = computerScale(lvl);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(s, s);
+    const draw = {
+      mac128k: drawEraMac128k, macplus: drawEraMac128k, macse: drawEraMacSE,
+      imacg3: drawEraImacG3, win95: drawEraPcTower, winxp: drawEraPcTower,
+      gamingpc: drawEraGamingPc, alienware: drawEraAlienware,
+    }[era.key] || drawEraMac128k;
+    draw(era.key === 'macplus');
+    ctx.restore();
+    if (showLabels) {
+      ctx.fillStyle = '#e0d9c5';
+      ctx.font = '600 10px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(era.label, x, y + 34 * s);
+    }
+  }
+
+  // All-in-one beige box, built-in screen — Mac 128K and Plus share this
+  // shape (Plus is very slightly taller, passed in via the `tall` flag)
+  function drawEraMac128k(tall) {
+    const h = tall ? 34 : 30;
+    ctx.fillStyle = '#d9d2c1';
+    ctx.fillRect(-16, -h, 32, h);
+    ctx.strokeStyle = '#8a8270'; ctx.lineWidth = 1;
+    ctx.strokeRect(-16, -h, 32, h);
+    ctx.fillStyle = '#2a2f38';
+    ctx.fillRect(-11, -h + 5, 22, 16);
+    ctx.fillStyle = '#7fa8c9';
+    ctx.fillRect(-9, -h + 7, 18, 12);
+    ctx.fillStyle = '#b5ac97';
+    ctx.fillRect(-11, -h + 22, 22, 3); // disk slot
+    ctx.fillStyle = '#c7c0ac';
+    ctx.fillRect(-20, -3, 40, 5); // keyboard
+  }
+  function drawEraMacSE(tall) {
+    ctx.fillStyle = '#c9c2b0';
+    ctx.fillRect(-17, -33, 34, 33);
+    ctx.strokeStyle = '#7d7663'; ctx.lineWidth = 1;
+    ctx.strokeRect(-17, -33, 34, 33);
+    ctx.fillStyle = '#20242c';
+    ctx.fillRect(-12, -28, 24, 17);
+    ctx.fillStyle = '#8fb8d6';
+    ctx.fillRect(-10, -26, 20, 13);
+    ctx.fillStyle = '#a49b85';
+    ctx.fillRect(-12, -8, 24, 3);
+    ctx.fillStyle = '#c7c0ac';
+    ctx.fillRect(-21, -3, 42, 5);
+  }
+  // Bondi-blue teardrop all-in-one — the one era that should read as a
+  // total style break from the beige boxes before and after it
+  function drawEraImacG3() {
+    ctx.fillStyle = 'rgba(70,150,190,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(0, -14, 20, 22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#3f8fb8';
+    ctx.beginPath();
+    ctx.ellipse(0, -16, 16, 17, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#1c2833';
+    ctx.fillRect(-11, -24, 22, 15);
+    ctx.fillStyle = '#a9d4ea';
+    ctx.fillRect(-9, -22, 18, 11);
+    ctx.fillStyle = '#3f8fb8';
+    ctx.fillRect(-4, -2, 8, 6); // curved foot, simplified
+    ctx.fillStyle = '#d8dee2';
+    ctx.fillRect(-20, 4, 40, 5); // keyboard
+  }
+  // Windows 95 / XP: a separate tower + monitor, not an all-in-one — the
+  // clearest silhouette difference from every Mac era before it
+  function drawEraPcTower(isXp) {
+    const beige = !isXp;
+    ctx.fillStyle = beige ? '#c7c2b3' : '#e8e8e8';
+    ctx.fillRect(14, -34, 14, 34); // tower
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1;
+    ctx.strokeRect(14, -34, 14, 34);
+    ctx.fillStyle = beige ? '#8f8a7a' : '#3a6fa8';
+    ctx.fillRect(16, -30, 10, 2);
+    ctx.fillRect(16, -25, 10, 2);
+    ctx.fillStyle = beige ? '#c7c2b3' : '#e8e8e8';
+    ctx.fillRect(-24, -26, 30, 22); // monitor body
+    ctx.fillStyle = '#1c2833';
+    ctx.fillRect(-21, -23, 24, 15);
+    ctx.fillStyle = isXp ? '#5a9bd8' : '#4a7a4a';
+    ctx.fillRect(-19, -21, 20, 11);
+    ctx.fillStyle = beige ? '#c7c2b3' : '#e8e8e8';
+    ctx.fillRect(-13, -4, 8, 5); // monitor stand
+    ctx.fillStyle = '#c7c0ac';
+    ctx.fillRect(-28, 3, 40, 5); // keyboard
+  }
+  // Black tower with a glowing RGB accent strip — reads as "gaming" at a glance
+  function drawEraGamingPc() {
+    ctx.fillStyle = '#181818';
+    ctx.fillRect(-10, -36, 20, 36);
+    ctx.fillStyle = '#c9a24b';
+    ctx.fillRect(-10, -36, 3, 36); // gold accent strip, matches the game's own theme color
+    ctx.fillStyle = '#4fd8e0';
+    ctx.beginPath(); ctx.arc(0, -18, 5, 0, Math.PI * 2); ctx.fill(); // RGB fan glow
+    ctx.fillStyle = '#1c2833';
+    ctx.fillRect(-24, -22, 26, 18);
+    ctx.fillStyle = '#5ad86b';
+    ctx.fillRect(-22, -20, 22, 14);
+    ctx.fillStyle = '#181818';
+    ctx.fillRect(-16, -4, 8, 5);
+    ctx.fillStyle = '#2a2a2a';
+    ctx.fillRect(-30, 2, 40, 5);
+  }
+  // Sleek angular laptop, lid open, glowing logo — the endpoint of the line
+  function drawEraAlienware() {
+    ctx.fillStyle = '#2b2b31';
+    ctx.beginPath();
+    ctx.moveTo(-22, 4); ctx.lineTo(22, 4); ctx.lineTo(18, -22); ctx.lineTo(-18, -22);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#111116';
+    ctx.fillRect(-16, -20, 32, 16);
+    ctx.fillStyle = '#4fd8e0';
+    ctx.beginPath(); ctx.arc(0, -12, 3, 0, Math.PI * 2); ctx.fill(); // glowing logo
+    ctx.fillStyle = '#3a3a42';
+    ctx.beginPath();
+    ctx.moveTo(-22, 4); ctx.lineTo(22, 4); ctx.lineTo(26, 9); ctx.lineTo(-26, 9);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#4fd8e0';
+    ctx.fillRect(-20, 5, 40, 1.5); // backlit keyboard glow line
+  }
+
   function drawMansion() {
+    if (isSonAccount()) {
+      drawComputerMansion(BASE.x, BASE.y, state.mansionLevel);
+      return;
+    }
     const lvl = state.mansionLevel;
     const x = BASE.x, y = BASE.y;
 
