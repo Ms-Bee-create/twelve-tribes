@@ -340,6 +340,9 @@
     padding: 5px 9px; cursor: pointer;
   }
   .tier-tab.active { border-color: var(--gold); color: var(--gold); background: rgba(201,162,75,0.12); }
+  .tier-tab.locked { opacity: 0.45; cursor: pointer; }
+  .train-tier-tabs { display: flex; gap: 6px; margin: 10px 0 12px; flex-wrap: wrap; }
+  .train-tier-tabs .tier-tab { font-size: 12px; padding: 7px 12px; }
   .formation-stepper { display: flex; align-items: center; gap: 8px; }
   .formation-slider { flex: 1; accent-color: var(--gold); height: 36px; cursor: pointer; }
   .formation-stepper-row2 { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
@@ -866,6 +869,7 @@
         </div>
         <button class="gold-btn" id="barracksBtn">Upgrade</button>
       </div>
+      <div class="train-tier-tabs" id="trainTierTabs"></div>
       <div id="troopTrainList"></div>
     </div>
 
@@ -1313,11 +1317,11 @@
     speedLevel: 1,
     mansionLevel: 1,
     barracksLevel: 1,
-    // 3 roles x 3 tiers each — see TROOP_TYPES below for what each unlocks at
+    // 3 roles x 5 tiers each — see TROOP_TYPES below for what each unlocks at
     troopTypes: {
-      enforcer1: { active: 0, wounded: 0 }, enforcer2: { active: 0, wounded: 0 }, enforcer3: { active: 0, wounded: 0 },
-      gunner1:   { active: 0, wounded: 0 }, gunner2:   { active: 0, wounded: 0 }, gunner3:   { active: 0, wounded: 0 },
-      driver1:   { active: 0, wounded: 0 }, driver2:   { active: 0, wounded: 0 }, driver3:   { active: 0, wounded: 0 },
+      enforcer1: { active: 0, wounded: 0 }, enforcer2: { active: 0, wounded: 0 }, enforcer3: { active: 0, wounded: 0 }, enforcer4: { active: 0, wounded: 0 }, enforcer5: { active: 0, wounded: 0 },
+      gunner1:   { active: 0, wounded: 0 }, gunner2:   { active: 0, wounded: 0 }, gunner3:   { active: 0, wounded: 0 }, gunner4:   { active: 0, wounded: 0 }, gunner5:   { active: 0, wounded: 0 },
+      driver1:   { active: 0, wounded: 0 }, driver2:   { active: 0, wounded: 0 }, driver3:   { active: 0, wounded: 0 }, driver4:   { active: 0, wounded: 0 }, driver5:   { active: 0, wounded: 0 },
     },
     hospitalLevel: 1,
     warehouseLevel: 1,
@@ -1328,7 +1332,10 @@
     research: {}, // researchKey -> highest completed level (0/absent = not researched)
     // 3 independently-built/upgraded plots per resource — 0 = not built yet.
     // Passive production, same tick mechanism as the Oil Press (garageLevel above).
-    resourceBuildings: { lumber: [0, 0, 0], food: [0, 0, 0], water: [0, 0, 0] },
+    // First plot of each starts pre-built at level 1 (same as the Oil Press
+    // starting at garageLevel 1) so a brand-new account isn't stuck at zero
+    // resources with nothing producing and nothing affordable to build.
+    resourceBuildings: { lumber: [1, 0, 0], food: [1, 0, 0], water: [1, 0, 0] },
     // the site itself, separate from its 3 plots — leveling it boosts every
     // plot's output instead of adding a new plot slot
     fieldLevels: { lumber: 1, food: 1, water: 1 },
@@ -1842,13 +1849,15 @@
   ];
   const TROOP_TYPES = (() => {
     const tiers = [
-      { tier: 1, roman: 'I',   tierMult: 1.0, unlockBarracks: 1, unlockMansion: 1 },
-      { tier: 2, roman: 'II',  tierMult: 2.0, unlockBarracks: 3, unlockMansion: 3 },
-      { tier: 3, roman: 'III', tierMult: 3.5, unlockBarracks: 6, unlockMansion: 6 },
+      { tier: 1, roman: 'I',   tierMult: 1.0, unlockBarracks: 1,  unlockMansion: 1 },
+      { tier: 2, roman: 'II',  tierMult: 2.0, unlockBarracks: 3,  unlockMansion: 3 },
+      { tier: 3, roman: 'III', tierMult: 3.5, unlockBarracks: 6,  unlockMansion: 6 },
+      { tier: 4, roman: 'IV',  tierMult: 5.0, unlockBarracks: 12, unlockMansion: 12 },
+      { tier: 5, roman: 'V',   tierMult: 7.0, unlockBarracks: 20, unlockMansion: 20 },
     ];
     const list = [];
     TROOP_ROLES.forEach(r => tiers.forEach(t => list.push({
-      key: r.role + t.tier, role: r.role, tier: t.tier,
+      key: r.role + t.tier, role: r.role, tier: t.tier, roman: t.roman,
       label: `${r.label} ${t.roman}`, row: r.row, desc: ROLE_DESC[r.role],
       tierMult: t.tierMult, unlockBarracks: t.unlockBarracks, unlockMansion: t.unlockMansion,
     })));
@@ -1856,9 +1865,6 @@
   })();
   function troopUnlocked(t) {
     return state.barracksLevel >= t.unlockBarracks && state.mansionLevel >= t.unlockMansion;
-  }
-  function nextLockedTier(role) {
-    return TROOP_TYPES.find(t => t.role === role && !troopUnlocked(t));
   }
 
   function totalActiveTroops() {
@@ -2122,7 +2128,8 @@
   function speedUpgradeCost() { return 150 * state.speedLevel; }
 
   function mansionResourceCost() {
-    return { lumber: 25 * state.mansionLevel, food: 20 * state.mansionLevel, water: 15 * state.mansionLevel };
+    const L = Math.pow(state.mansionLevel, RESOURCE_COST_EXPONENT);
+    return { lumber: Math.round(25 * L), food: Math.round(20 * L), water: Math.round(15 * L) };
   }
   function mansionBuildMs() { return Math.round(270000 * Math.pow(state.mansionLevel, 1.5) * (1 - researchBonusPct('build_speed'))); }
   function mansionRequirement() {
@@ -2144,13 +2151,15 @@
   function recruitCost() { return 300 * heroes.length; }
 
   function barracksResourceCost() {
-    return { lumber: 20 * state.barracksLevel, food: 15 * state.barracksLevel };
+    const L = Math.pow(state.barracksLevel, RESOURCE_COST_EXPONENT);
+    return { lumber: Math.round(20 * L), food: Math.round(15 * L) };
   }
   function barracksBuildMs() { return Math.round(210000 * Math.pow(state.barracksLevel, 1.5) * (1 - researchBonusPct('build_speed'))); }
 
   function heroUpgradeCoinCost(hero) { return 180 * hero.level; }
   function heroUpgradeResourceCost(hero) {
-    return { food: 18 * hero.level, water: 12 * hero.level };
+    const L = Math.pow(hero.level, RESOURCE_COST_EXPONENT);
+    return { food: Math.round(18 * L), water: Math.round(12 * L) };
   }
 
   // Hero gear, crafted at the Forge from syndicate drops (rollLoot() above
@@ -2204,7 +2213,7 @@
   function troopTrainMs(t) { return Math.round(Math.max(135000, 330000 - state.barracksLevel * 22500) * (1 + (t.tierMult - 1) * 0.4) * (1 - researchBonusPct('train_speed'))); }
   function troopTrainResourceCost(t) { return { food: Math.round(15 * t.tierMult) }; }
 
-  function hospitalResourceCost() { return { lumber: 15 * state.hospitalLevel }; }
+  function hospitalResourceCost() { return { lumber: Math.round(15 * Math.pow(state.hospitalLevel, RESOURCE_COST_EXPONENT)) }; }
   function hospitalBuildMs() { return Math.round(180000 * Math.pow(state.hospitalLevel, 1.5) * (1 - researchBonusPct('build_speed'))); }
   // Field Medicine research turns Camp growth into real heal capacity —
   // earned through research investment (the multiplier is 0 until you've
@@ -2229,7 +2238,7 @@
   }
 
   function garageOutput() { return 0.4 * state.garageLevel; }
-  function garageResourceCost() { return { lumber: 18 * state.garageLevel }; }
+  function garageResourceCost() { return { lumber: Math.round(18 * Math.pow(state.garageLevel, RESOURCE_COST_EXPONENT)) }; }
   function garageBuildMs() { return Math.round(195000 * Math.pow(state.garageLevel, 1.5) * (1 - researchBonusPct('build_speed'))); }
   // How long a production building can run unattended before its buffer
   // fills up and it stops — a real ceiling, not a soft slowdown, so
@@ -2258,12 +2267,13 @@
     return state.resourceBuildings[resourceKey].reduce((sum, lvl) => sum + fieldPlotOutputPerHour(lvl, resourceKey), 0);
   }
   function fieldPlotResourceCost(field, plotIndex) {
-    return { [field.costResource]: 15 * (state.resourceBuildings[field.key][plotIndex] + 1) };
+    const nextLevel = state.resourceBuildings[field.key][plotIndex] + 1;
+    return { [field.costResource]: Math.round(15 * Math.pow(nextLevel, RESOURCE_COST_EXPONENT)) };
   }
   function fieldPlotBuildMs(resourceKey, plotIndex) {
     return Math.round(180000 * Math.pow(state.resourceBuildings[resourceKey][plotIndex] + 1, 1.5) * (1 - researchBonusPct('build_speed')));
   }
-  function fieldSiteResourceCost(field) { return { [field.costResource]: 20 * state.fieldLevels[field.key] }; }
+  function fieldSiteResourceCost(field) { return { [field.costResource]: Math.round(20 * Math.pow(state.fieldLevels[field.key], RESOURCE_COST_EXPONENT)) }; }
   function fieldSiteBuildMs(field) {
     return Math.round(225000 * Math.pow(state.fieldLevels[field.key], 1.5) * (1 - researchBonusPct('build_speed')));
   }
@@ -2278,6 +2288,15 @@
   // Soft cap for now on every leveled building and every research project —
   // headroom to grow into, not a hand-tuned final balance.
   const MAX_LEVEL = 100;
+  // Real games in this genre (Rise of Kingdoms' City Hall costs, confirmed
+  // via its own guides) grow upgrade resource cost MUCH faster than a flat
+  // per-level amount — steep enough that late-game upgrades genuinely
+  // require farming/grinding or spending silver, not just waiting out a
+  // timer. A raw per-level compounding rate (like RoK's own ~1.5x/level)
+  // would be meaningless over this file's 100-level range, so this uses the
+  // same "level^exponent" power-curve shape already established for build
+  // time, just with a steeper exponent — level 1 cost is unchanged either way.
+  const RESOURCE_COST_EXPONENT = 2.2;
   // Camp (mansion) is a hard ceiling on the 5 core support buildings, same as
   // Mansion/City Hall in Mafia City / Rise of Kingdoms — keeps any one stat
   // from being maxed while the Camp itself lags behind.
@@ -2299,17 +2318,19 @@
       { key: 'train_speed',        category: 'Hero',    label: 'Drill Instructors', desc: 'Shortens troop training time and grows each training batch.' },
     ];
     // Short at first, dramatically longer as the payoff grows: time scales
-    // as level^1.5 (level 100 costs exactly 1000x level 1's time), while the
-    // bonus and resource cost stay linear so resources never become the real
-    // bottleneck — time (and the Store's speedup tokens) is.
+    // as level^1.5 (level 100 costs exactly 1000x level 1's time). Resource
+    // cost now scales with the same RESOURCE_COST_EXPONENT every other
+    // level-based cost in the file uses, so a maxed research line is a real
+    // resource investment too, not just a time sink.
     const list = [];
     projects.forEach(p => {
       for (let level = 1; level <= MAX_LEVEL; level++) {
+        const costL = Math.pow(level, RESOURCE_COST_EXPONENT);
         list.push({
           ...p, level, unlockLab: level,
           bonusPct: Math.min(0.80, level * 0.008),
           ms: Math.round(300000 * Math.pow(level, 1.5)),
-          resourceCost: { lumber: Math.round(4 * level), food: Math.round(3 * level) },
+          resourceCost: { lumber: Math.round(4 * costL), food: Math.round(3 * costL) },
         });
       }
     });
@@ -2347,14 +2368,33 @@
     const item = RESEARCH_ITEMS.find(r => r.key === key && r.level === current);
     return item ? item.bonusPct : 0;
   }
-  function researchLabResourceCost() { return { lumber: 25 * state.researchLevel, food: 20 * state.researchLevel }; }
+  function researchLabResourceCost() {
+    const L = Math.pow(state.researchLevel, RESOURCE_COST_EXPONENT);
+    return { lumber: Math.round(25 * L), food: Math.round(20 * L) };
+  }
   function researchLabBuildMs() { return Math.round(240000 * Math.pow(state.researchLevel, 1.5) * (1 - researchBonusPct('build_speed'))); }
 
   const RELOCATE_FUEL_COST = 150;
   const RELOCATE_COOLDOWN_MS = 4 * 60 * 1000;
-  function warehouseResourceCost() { return { lumber: 20 * state.warehouseLevel, food: 20 * state.warehouseLevel }; }
+  function warehouseResourceCost() {
+    const L = Math.pow(state.warehouseLevel, RESOURCE_COST_EXPONENT);
+    return { lumber: Math.round(20 * L), food: Math.round(20 * L) };
+  }
   function warehouseBuildMs() { return Math.round(195000 * Math.pow(state.warehouseLevel, 1.5) * (1 - researchBonusPct('build_speed'))); }
-  function resourceCap() { return Math.round((500 + (state.warehouseLevel - 1) * 400) * (1 + researchBonusPct('warehouse_capacity'))); }
+  // Field sites/plots aren't capped by Camp the way the 5 core buildings are
+  // (deliberately optional investment) -- so a player who leans entirely into
+  // fields while ignoring the Storehouse could need to hold more than
+  // warehouseLevel alone would ever provide. Capacity tracks whichever
+  // investment is actually further along.
+  function maxFieldLevelReached() {
+    let max = state.warehouseLevel;
+    FIELD_TYPES.forEach(f => {
+      max = Math.max(max, state.fieldLevels[f.key]);
+      state.resourceBuildings[f.key].forEach(lvl => { max = Math.max(max, lvl); });
+    });
+    return max;
+  }
+  function resourceCap() { return Math.round((1000 * Math.pow(maxFieldLevelReached(), 1.5)) * (1 + researchBonusPct('warehouse_capacity'))); }
 
   function powerRating() {
     const heroLevelSum = heroes.reduce((sum, h) => sum + h.level, 0);
@@ -5332,10 +5372,43 @@
     renderReportsRoom();
   }
 
+  // Tier is the top-level tab here (opposite grouping from the deployment
+  // screen's per-role tabs) since tiers unlock as discrete milestones and
+  // there are now 5 of them — a flat list of 15 cards stopped being usable.
+  let trainActiveTier = null;
+  function highestUnlockedTrainTier() {
+    const tiers = [...new Set(TROOP_TYPES.map(t => t.tier))];
+    const unlocked = tiers.filter(tier => troopUnlocked(TROOP_TYPES.find(t => t.tier === tier)));
+    return unlocked.length ? Math.max(...unlocked) : 1;
+  }
   function renderBarracksTroopCards() {
+    const allTiers = [...new Set(TROOP_TYPES.map(t => t.tier))];
+    if (trainActiveTier == null || !allTiers.includes(trainActiveTier)) trainActiveTier = highestUnlockedTrainTier();
+
+    const tabsEl = document.getElementById('trainTierTabs');
+    tabsEl.innerHTML = '';
+    allTiers.forEach(tier => {
+      const rep = TROOP_TYPES.find(t => t.tier === tier);
+      const unlocked = troopUnlocked(rep);
+      const tab = document.createElement('button');
+      tab.className = 'tier-tab' + (tier === trainActiveTier ? ' active' : '') + (unlocked ? '' : ' locked');
+      tab.textContent = `Tier ${rep.roman}`;
+      tab.addEventListener('click', () => { trainActiveTier = tier; renderBarracksTroopCards(); });
+      tabsEl.appendChild(tab);
+    });
+
     const list = document.getElementById('troopTrainList');
     list.innerHTML = '';
-    TROOP_TYPES.filter(troopUnlocked).forEach(t => {
+    const activeRep = TROOP_TYPES.find(t => t.tier === trainActiveTier);
+    if (!troopUnlocked(activeRep)) {
+      const hint = document.createElement('div');
+      hint.className = 'quest-progress';
+      hint.textContent = `Tier ${activeRep.roman} unlocks at Muster ${activeRep.unlockBarracks} & Camp ${activeRep.unlockMansion} (you're at Muster ${state.barracksLevel}, Camp ${state.mansionLevel}).`;
+      list.appendChild(hint);
+      return;
+    }
+
+    TROOP_TYPES.filter(t => t.tier === trainActiveTier).forEach(t => {
       const pool = state.troopTypes[t.key];
       const timerKey = 'train_' + t.key;
       const card = document.createElement('div');
@@ -5394,18 +5467,6 @@
       }
       card.appendChild(btn);
       list.appendChild(card);
-    });
-
-    // one compact hint per role for whatever tier isn't unlocked yet, instead
-    // of cluttering the room with locked cards
-    ['enforcer', 'gunner', 'driver'].forEach(role => {
-      const next = nextLockedTier(role);
-      if (!next) return;
-      const hint = document.createElement('div');
-      hint.className = 'quest-progress';
-      hint.style.marginBottom = '8px';
-      hint.textContent = `${next.label} unlocks at Muster ${next.unlockBarracks} & Camp ${next.unlockMansion} (you're at Muster ${state.barracksLevel}, Camp ${state.mansionLevel}).`;
-      list.appendChild(hint);
     });
   }
 
