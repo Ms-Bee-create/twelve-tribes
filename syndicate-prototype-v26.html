@@ -310,6 +310,15 @@
     color: var(--gold); margin-bottom: 4px; padding-right: 40px;
   }
   .formation-sub { font-size: 11px; color: var(--paper-dim); margin-bottom: 16px; }
+  .formation-hero-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .hero-pick-pill {
+    font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 600;
+    border: 1px solid var(--stone-line); background: var(--stone); color: var(--paper-dim);
+    padding: 7px 11px; cursor: pointer; text-align: left; line-height: 1.4;
+  }
+  .hero-pick-pill.active { border-color: var(--gold); color: var(--gold); background: rgba(201,162,75,0.14); }
+  .hero-pick-pill.disabled { opacity: 0.4; cursor: not-allowed; }
+  .hero-pick-pill-sub { display: block; font-size: 9px; font-weight: 400; opacity: 0.85; }
   .formation-row { margin-bottom: 14px; }
   .formation-row-label {
     display: flex; justify-content: space-between; align-items: baseline;
@@ -742,6 +751,8 @@
 
     <div class="formation-presets-pop" id="formationPresetsPop" style="display:none"></div>
 
+    <div class="formation-hero-picker" id="formationHeroPicker"></div>
+
     <div id="formationRows"></div>
 
     <div class="formation-preview" id="formationPreview">Attack power: 12</div>
@@ -1062,7 +1073,7 @@
       </div>
       <div class="help-entry">
         <div class="help-entry-name">Forge</div>
-        <div class="help-entry-desc">Buy Sandals (a permanent hero speed upgrade) and Skins of Wine (a one-time item that restores 20 stamina when used from Provisions).</div>
+        <div class="help-entry-desc">Buy Sandals, a permanent hero speed upgrade. Skins of Wine (restore stamina) are sold at the Market now.</div>
       </div>
       <div class="help-entry">
         <div class="help-entry-name">The Market</div>
@@ -1225,20 +1236,13 @@
     </div>
 
     <div class="room-body theme-armory" id="room-armory" style="display:none">
-      <p class="room-intro">Sandals and skins of wine — nothing fancy, just what keeps a hero moving.</p>
+      <p class="room-intro">Sandals — nothing fancy, just what keeps a hero moving. Skins of wine are sold at the Market now.</p>
       <div class="item-card">
         <div class="item-info">
           <div class="item-name">Sandals</div>
           <div class="item-meta" id="speedMeta">Current speed: level 1.</div>
         </div>
         <button class="gold-btn" id="speedBtn">Upgrade</button>
-      </div>
-      <div class="item-card">
-        <div class="item-info">
-          <div class="item-name">Skin of Wine</div>
-          <div class="item-meta">Adds one to your Provisions. Restores 20 stamina when used — use it from the Provisions tent.</div>
-        </div>
-        <button class="gold-btn" id="potionBtn">Buy — 100 silver</button>
       </div>
       <div class="item-card">
         <div class="item-info">
@@ -1333,8 +1337,8 @@
   };
   const inventory = {}; // itemName -> count
 
-  function rollLoot(target) {
-    if (Math.random() > 0.3) return null;
+  function rollLoot(target, chanceMult) {
+    if (Math.random() > 0.3 * (chanceMult || 1)) return null;
     const pool = LOOT_TABLE[target.icon] || [];
     if (!pool.length) return null;
     const item = pool[Math.floor(Math.random() * pool.length)];
@@ -1417,10 +1421,11 @@
     { key: 'lumber', names: { 1: 'Lumber Camp',    2: 'Timber Grove',       3: 'Ancient Timberland' },  baseOutput: 1,   reserveMult: 1,   color: '#4d6b4f' },
     { key: 'food',   names: { 1: 'Grain Farm',     2: 'Fertile Fields',     3: 'Desert Grain Farm' },   baseOutput: 1.2, reserveMult: 1,   color: '#c17d3f' },
     { key: 'water',  names: { 1: 'Water Well',     2: 'Deep Well',          3: 'Desert Spring' },       baseOutput: 0.8, reserveMult: 1,   color: '#4a7a8c' },
-    // gold is deliberately the slowest resource to farm: lower output AND a
-    // bigger reserve than the other 3 types at the same tier (reserveMult),
-    // so it's a real, deliberate investment rather than just another tile
-    { key: 'gold',   names: { 1: 'Gold Mine',      2: 'Gold Vault',         3: 'Buried Gold Cache' },   baseOutput: 0.7, reserveMult: 1.5, color: '#c9a24b' },
+    // gold is deliberately the slowest resource to farm — a much lower
+    // output than the other 3 (reserveMult then trims its reserve back down
+    // to a comparable multi-hour drain time despite the tiny rate, rather
+    // than letting a low rate against a big reserve balloon into days)
+    { key: 'gold',   names: { 1: 'Gold Mine',      2: 'Gold Vault',         3: 'Buried Gold Cache' },   baseOutput: 0.02, reserveMult: 0.016, color: '#c9a24b' },
   ];
   const HUB_PER_TYPE_PER_TIER = 4; // 4 types x 4 instances x 3 tiers = 48 tiles total, up from 12
   // Every tile now has a real numeric level (shown on the map), rolled within
@@ -1431,7 +1436,7 @@
   // tier now only decides which range of levels a region can roll and which
   // of the 3 display names it uses.
   const HUB_TIER_LEVEL_RANGE = { 1: [1, 3], 2: [4, 7], 3: [8, 10] };
-  const HUB_RESERVE_PER_LEVEL = 40000;
+  const HUB_RESERVE_PER_LEVEL = 270000; // ~4h to fully drain a maxed-troop level-9 tile, up from ~35min
   const HUB_REGEN_MS_PER_LEVEL = 2 * 60000;
   // Hard cap, not just diminishing returns: beyond this many troops, sending
   // MORE does nothing further for this tile's gather rate. Real strategy
@@ -1861,16 +1866,38 @@
   function effectiveDefense(troopsObj) {
     return TROOP_TYPES.reduce((sum, t) => sum + (troopsObj[t.key]?.active ?? troopsObj[t.key] ?? 0) * t.tierMult * ROLE_DEFENSE[t.role], 0);
   }
+  // Both hero level and account level (state.level) are uncapped — nothing
+  // else stops a hero from reaching level 500 or an account from reaching
+  // level 2000 over enough play time. Left uncapped, this multiplier grows
+  // forever and eventually recreates the exact "3 million attack power"
+  // problem again in REAL combat (not just the display stat fixed above),
+  // since it multiplies whatever formation actually gets sent. Every other
+  // progression system in this game hits a hard MAX_LEVEL=100 ceiling
+  // instead of scaling open-ended — this brings hero/account level in line
+  // with that same convention rather than being the one exception.
   function heroSkillMultiplier(hero) {
-    return 1 + ((hero ? hero.level : 1) - 1) * 0.05 + (state.level - 1) * 0.02;
+    const heroLvl = Math.min(MAX_LEVEL, hero ? hero.level : 1);
+    const acctLvl = Math.min(MAX_LEVEL, state.level);
+    return 1 + (heroLvl - 1) * 0.05 + (acctLvl - 1) * 0.02;
   }
   // raw formation strength with no specific opponent in mind (display use —
   // e.g. "attack power" before you've picked a target) — neutral 1.0x counter
   function heroPowerWithFormation(hero, formation, opponentComposition) {
     return Math.round((12 + heroGearBonus(hero, 'blade') + effectiveAttack(formation, opponentComposition)) * heroSkillMultiplier(hero));
   }
+  // A hero's OWN power — level, gear, skill — with no troop count in it at
+  // all. This used to run the player's entire home army (activeTroopsFormation,
+  // everything sitting at Camp, not just what's being sent anywhere) through
+  // heroPowerWithFormation, so a hero's displayed "Attack power" was really
+  // "your whole stockpile's power," scaling into the millions purely from
+  // how many troops happened to be sitting at home — the exact "3 million at
+  // level 21" complaint. Real games (Rise of Kingdoms confirmed: Commander
+  // Power and Troops Power are tracked as separate categories) keep a
+  // hero's own stat scoped to the hero. Troop-based march power still shows
+  // correctly elsewhere via heroPowerWithFormation(hero, THAT march's
+  // formation) — this only fixes the per-hero stat shown in Chieftains.
   function heroPower(hero) {
-    return heroPowerWithFormation(hero, activeTroopsFormation());
+    return Math.round((12 + heroGearBonus(hero, 'blade')) * heroSkillMultiplier(hero));
   }
 
   // ratio = effectiveAttack / effectiveDefense -> outcome band + how much of
@@ -2095,7 +2122,14 @@
     const g = GEAR_TYPES.find(x => x.key === gearKey);
     return g.bonusPerTier * state.gear[gearKey];
   }
-  function heroMaxStamina(hero) { return baseMaxStamina() + heroGearBonus(hero, 'banner'); }
+  // +2 max stamina per hero level — a hero's own level previously did
+  // nothing for stamina at all (only Camp level/research/gear did), which
+  // made "how much does leveling raise stamina" a trick question. This
+  // stacks on top of that shared base, same pattern as the flat gear bonus.
+  const HERO_LEVEL_STAMINA_BONUS = 2;
+  function heroMaxStamina(hero) {
+    return baseMaxStamina() + heroGearBonus(hero, 'banner') + ((hero ? hero.level : 1) - 1) * HERO_LEVEL_STAMINA_BONUS;
+  }
   // Ward of the Covenant knocks a flat fraction off this hero's own losses —
   // this game's stand-in for a "health/defense boost," since troops (not
   // heroes) are what actually gets wounded in a fight
@@ -3144,7 +3178,14 @@
       const t = ref;
       const variance = 0.8 + Math.random() * 0.4;
       const isCrit = Math.random() < critChance();
-      const dmg = Math.round(effectiveAttack(m.formation, t.composition) * heroSkillMultiplier(hero) * variance * (isCrit ? 2 : 1));
+      // a hero's own flat base (+ gear) — same term heroPowerWithFormation
+      // already showed in every power preview/stat, but combat resolution
+      // never actually included it, so a hero sent with zero troops always
+      // dealt exactly zero damage no matter what the preview implied.
+      // Syndicates specifically are meant to be soloable — raids/seizing the
+      // City Gate still need real troops, this is scoped to targets only.
+      const heroBase = 12 + heroGearBonus(hero, 'blade');
+      const dmg = Math.round((heroBase + effectiveAttack(m.formation, t.composition)) * heroSkillMultiplier(hero) * variance * (isCrit ? 2 : 1));
       const healthBefore = t.health;
       t.health = Math.max(0, t.health - dmg);
       const killed = t.health <= 0;
@@ -3160,24 +3201,34 @@
       hero.flashColor = isCrit ? '#ffffff' : (killed ? '#c9a24b' : '#e0bc6f');
       hero.flashUntil = performance.now() + (isCrit ? 550 : 400);
 
-      const chipCoins = Math.round(dmgApplied * t.coinPerHp);
+      // Crit's damage-doubling above still matters for actually landing a
+      // kill you couldn't otherwise — but once the overkill cap kicks in
+      // (dmgApplied maxes out at the target's own health), that doubling
+      // stops showing up in the payout at all, since a capped crit and a
+      // capped regular hit both land on the same healthBefore ceiling. Apply
+      // a separate reward multiplier so a crit always pays more, regardless
+      // of whether it was also an overkill.
+      const CRIT_REWARD_MULT = 1.5;
+      const rewardMult = isCrit ? CRIT_REWARD_MULT : 1;
+      const chipCoins = Math.round(dmgApplied * t.coinPerHp * rewardMult);
       state.coins += chipCoins;
-      gainXp(Math.round(dmgApplied * 0.28));
+      gainXp(Math.round(dmgApplied * 0.28 * rewardMult));
       const critTag = isCrit ? 'CRITICAL! ' : '';
 
       if (killed) {
-        const bonusCoins = Math.round(t.maxHealth * t.coinPerHp * 0.3);
+        const bonusCoins = Math.round(t.maxHealth * t.coinPerHp * 0.3 * rewardMult);
         state.coins += bonusCoins;
-        gainXp(t.xpKill);
+        const killXp = Math.round(t.xpKill * rewardMult);
+        gainXp(killXp);
         t.health = t.maxHealth;
         t.deadUntil = performance.now() + t.respawnMs;
         relocateTarget(t);
         state.eventPoints += 1;
         const kq = quests.find(q => q.id === 'kills3');
         if (kq && !kq.claimed) kq.progress = Math.min(kq.target, kq.progress + 1);
-        const loot = rollLoot(t);
+        const loot = rollLoot(t, rewardMult);
         const lootTag = loot ? ` Picked up: ${loot}.` : '';
-        addLog(`${critTag}${hero.name} took down ${t.name} — ${chipCoins + bonusCoins} silver, +${t.xpKill} xp.${lootTag} Regrouping ${Math.round(t.respawnMs/1000)}s.`, isCrit ? 'crit' : 'win', 'combat');
+        addLog(`${critTag}${hero.name} took down ${t.name} — ${chipCoins + bonusCoins} silver, +${killXp} xp.${lootTag} Regrouping ${Math.round(t.respawnMs/1000)}s.`, isCrit ? 'crit' : 'win', 'combat');
       } else {
         addLog(`${critTag}${hero.name} hit ${t.name} for ${dmg} dmg (+${chipCoins} silver). ${Math.max(0,Math.ceil(t.health))}/${t.maxHealth} hp left.`, isCrit ? 'crit' : 'chip', 'combat');
       }
@@ -4094,36 +4145,61 @@
     return obstacles.every(o => Math.hypot(o.x - x, o.y - y) >= minDist);
   }
 
+  // Shared by both relocate entry points: the old "arm it from the Oil Press
+  // first" flow and tapping empty space directly. Shows the real fuel cost
+  // against what's actually on hand, right in the confirm prompt.
+  function attemptRelocateTo(wx, wy) {
+    const cooldownRemain = Math.max(0, state.relocateReadyAt - performance.now());
+    if (cooldownRemain > 0) { mapStatus.textContent = `Relocating again is ready in ${fmtSecs(cooldownRemain)}.`; return; }
+    if (!isValidMansionSpot(wx, wy)) {
+      mapStatus.textContent = 'Too close to something else, or too near the edge — try another spot.';
+      return;
+    }
+    const haveFuel = Math.floor(state.resources.fuel);
+    const ok = confirm(`Move your Camp here? Costs ${RELOCATE_FUEL_COST} oil — you have ${haveFuel}.`);
+    if (!ok) { mapStatus.textContent = 'Relocate cancelled.'; return; }
+    if (state.resources.fuel < RELOCATE_FUEL_COST) {
+      mapStatus.textContent = `Not enough oil — need ${RELOCATE_FUEL_COST}, have ${haveFuel}.`;
+      return;
+    }
+    BASE.x = wx; BASE.y = wy;
+    heroes.forEach(h => { if (h.state === 'idle') { h.x = BASE.x; h.y = BASE.y; } });
+    state.resources.fuel -= RELOCATE_FUEL_COST;
+    state.relocateReadyAt = performance.now() + RELOCATE_COOLDOWN_MS;
+    addLog(`Broke camp and moved to X ${Math.round(BASE.x)}, Y ${Math.round(BASE.y)}.`, 'win', 'building');
+    mapStatus.textContent = 'Camp relocated.';
+    render();
+  }
+
   function handleMapTap(wx, wy) {
     if (placingMansion) {
-      if (!isValidMansionSpot(wx, wy)) {
-        mapStatus.textContent = 'Too close to something else, or too near the edge — try another spot.';
-        return;
-      }
-      const ok = confirm(`Break camp and move to X ${Math.round(wx)}, Y ${Math.round(wy)} for ${RELOCATE_FUEL_COST} oil?`);
-      if (!ok) { mapStatus.textContent = 'Pick another spot, or open the Oil Press to cancel.'; return; }
-      BASE.x = wx; BASE.y = wy;
-      heroes.forEach(h => { if (h.state === 'idle') { h.x = BASE.x; h.y = BASE.y; } });
-      state.resources.fuel -= RELOCATE_FUEL_COST;
-      state.relocateReadyAt = performance.now() + RELOCATE_COOLDOWN_MS;
       placingMansion = false;
-      addLog(`Broke camp and moved to X ${Math.round(BASE.x)}, Y ${Math.round(BASE.y)}.`, 'win', 'building');
-      mapStatus.textContent = 'Camp relocated.';
-      render();
+      attemptRelocateTo(wx, wy);
       return;
     }
 
     const clickedHero = heroes.find(h => Math.hypot(h.x - wx, h.y - wy) < 20);
     if (clickedHero) {
       if (clickedHero.id === selectedId && clickedHero.state !== 'idle' && clickedHero.state !== 'farming') {
-        // tapping an already-selected, stuck-busy hero force-recalls them —
-        // an escape hatch in case a mission never resolved back to idle
+        // Tapping your own busy hero force-recalls them mid-march — skips
+        // whatever fight is in progress entirely (no losses, no rewards,
+        // troops come home exactly as sent). That's real value (bail out of
+        // a march you regret, or free a hero up early), so it costs a
+        // purchased Recall Order rather than being a free, unlimited escape
+        // hatch — a real balance concern this used to be.
+        if ((inventory['Recall Order'] || 0) <= 0) {
+          mapStatus.textContent = `Pulling ${clickedHero.name} back mid-march needs a Recall Order — buy one at the Market.`;
+          selectedId = clickedHero.id;
+          render();
+          return;
+        }
+        inventory['Recall Order'] -= 1;
         clickedHero.state = 'idle';
         clickedHero.farmingHub = null;
         clickedHero.x = BASE.x; clickedHero.y = BASE.y;
         clickedHero.march = null;
         if (clickedHero.formation) { returnFormation(clickedHero.formation); clickedHero.formation = null; }
-        addLog(`Manually recalled ${clickedHero.name}.`, 'hub', 'gathering');
+        addLog(`Used a Recall Order — pulled ${clickedHero.name} back immediately.`, 'win', 'system');
       } else if (clickedHero.state === 'farming') {
         recallHero(clickedHero);
       }
@@ -4153,10 +4229,11 @@
       const alreadyHeld = isMp ? mpGovernorHeldByMe() : state.governorHeld;
       if (alreadyHeld) { mapStatus.textContent = isMp ? 'You already hold the city.' : 'You already hold the city — it resets in time.'; return; }
       if (!heroes.some(h => h.state === 'idle')) { mapStatus.textContent = 'Select an idle hero to seize the office.'; return; }
-      let readyHero = findHeroWithStamina(50);
+      const readyHero = findHeroWithStamina(50);
       if (!readyHero) { openStaminaModal(50); return; }
-      readyHero = useHeroForAction(readyHero);
-      openFormationModal(readyHero, `Seize the City Gate`, (formation) => sendHeroToSeizeGovernor(readyHero, formation), { oddsTarget: { power: effPower, composition: effComposition } });
+      openFormationModal(readyHero, `Seize the City Gate`, (formation, chosenHero) => sendHeroToSeizeGovernor(chosenHero, formation), {
+        oddsTarget: { power: effPower, composition: effComposition }, staminaCost: 50, allowReinforcement: false,
+      });
       return;
     }
 
@@ -4169,13 +4246,12 @@
         mapStatus.textContent = `Scouting ${rb.name}...`;
         return;
       }
-      const hero = selectedHero();
       const readyHero = findHeroWithStamina(rb.cost);
-      if (readyHero) {
-        useHeroForAction(readyHero);
-        openFormationModal(readyHero, `Raid ${rb.name}`, (formation) => sendHeroToRaid(readyHero, rb, formation), { oddsTarget: rb });
-      } else if (canSendReinforcement()) {
-        openFormationModal(null, `Send Reinforcements to Raid ${rb.name}`, (formation) => sendReinforcementsToRaid(rb, formation), { oddsTarget: rb });
+      if (readyHero || canSendReinforcement()) {
+        openFormationModal(readyHero, `Raid ${rb.name}`, (formation, chosenHero) => {
+          if (chosenHero) sendHeroToRaid(chosenHero, rb, formation);
+          else sendReinforcementsToRaid(rb, formation);
+        }, { oddsTarget: rb, staminaCost: rb.cost, allowReinforcement: true });
       } else if (heroes.some(h => h.state === 'idle')) {
         openStaminaModal(rb.cost);
       } else {
@@ -4188,12 +4264,23 @@
     if (otherPlayer) {
       if (!mpSession) { mapStatus.textContent = 'Sign in to raid real players.'; return; }
       if (!heroes.some(h => h.state === 'idle')) { mapStatus.textContent = 'Select an idle hero to raid.'; return; }
-      let readyHero = findHeroWithStamina(PVP_RAID_STAMINA_COST);
+      const readyHero = findHeroWithStamina(PVP_RAID_STAMINA_COST);
       if (!readyHero) { openStaminaModal(PVP_RAID_STAMINA_COST); return; }
-      readyHero = useHeroForAction(readyHero);
-      openFormationModal(readyHero, `Raid ${otherPlayer.display_name}`, (formation) => sendHeroToRaidPlayer(readyHero, otherPlayer, formation), {
+      openFormationModal(readyHero, `Raid ${otherPlayer.display_name}`, (formation, chosenHero) => sendHeroToRaidPlayer(chosenHero, otherPlayer, formation), {
         oddsTarget: { power: effectiveDefense(otherPlayer.troops), composition: roleProportions(otherPlayer.troops) },
+        staminaCost: PVP_RAID_STAMINA_COST, allowReinforcement: false,
       });
+      return;
+    }
+
+    // Figure out whether this tap actually hit anything BEFORE gating on
+    // hero/reinforcement availability — relocating the Camp needs neither,
+    // so an empty-space tap should offer that regardless of hero state,
+    // not get swallowed by the "all your heroes are out" message below.
+    const hub = hubs.find(h => Math.abs(h.x - wx) < 20 && Math.abs(h.y - wy) < 20);
+    const t = !hub && targets.find(tt => Math.hypot(tt.x - wx, tt.y - wy) < 16);
+    if (!hub && !t) {
+      attemptRelocateTo(wx, wy);
       return;
     }
 
@@ -4210,36 +4297,30 @@
       return;
     }
 
-    const hub = hubs.find(h => Math.abs(h.x - wx) < 20 && Math.abs(h.y - wy) < 20);
     if (hub) {
       if (performance.now() < hub.depletedUntil) { mapStatus.textContent = `${hub.name} is tapped out. Give it time to recover.`; return; }
       if (totalActiveTroops() < 1) {
         mapStatus.textContent = 'Need at least one trained troop to farm. Visit the Muster.';
         return;
       }
-      if (heroIdle) {
-        openFormationModal(hero, `Send Troops to Farm ${hub.name}`, (formation) => sendHeroToFarm(hero, hub, formation), { farmHub: hub, minTroops: 1 });
-      } else {
-        openFormationModal(null, `Send Reinforcements to Farm ${hub.name}`, (formation) => sendReinforcementsToFarm(hub, formation), { farmHub: hub, minTroops: 1 });
-      }
+      openFormationModal(heroIdle ? hero : null, `Send Troops to Farm ${hub.name}`, (formation, chosenHero) => {
+        if (chosenHero) sendHeroToFarm(chosenHero, hub, formation);
+        else sendReinforcementsToFarm(hub, formation);
+      }, { farmHub: hub, minTroops: 1, allowReinforcement: true });
       return;
     }
 
-    const t = targets.find(t => Math.hypot(t.x - wx, t.y - wy) < 16);
-    if (!t) return;
     if (performance.now() < t.deadUntil) { mapStatus.textContent = `${t.name} is regrouping. Wait it out.`; return; }
-    if (heroIdle) {
-      if (hero.stamina < t.cost) {
-        let readyHero = findHeroWithStamina(t.cost);
-        if (!readyHero) { openStaminaModal(t.cost); return; }
-        readyHero = useHeroForAction(readyHero);
-        openFormationModal(readyHero, `Attack ${t.name}`, (formation) => sendHeroToAttack(readyHero, t, formation));
-        return;
-      }
-      openFormationModal(hero, `Attack ${t.name}`, (formation) => sendHeroToAttack(hero, t, formation));
-    } else {
-      openFormationModal(null, `Send Reinforcements to Attack ${t.name}`, (formation) => sendReinforcementsToAttack(t, formation));
-    }
+    // Syndicates are soloable now (see resolveCombatMarch) — 0 troops with
+    // just a hero is a real, damage-dealing option, not blocked here. The
+    // in-modal picker covers switching to a different hero if the one
+    // selected on the map is short on stamina.
+    const defaultHero = heroIdle && hero.stamina >= t.cost ? hero : findHeroWithStamina(t.cost);
+    if (!defaultHero && !canSendReinforcement()) { openStaminaModal(t.cost); return; }
+    openFormationModal(defaultHero, `Attack ${t.name}`, (formation, chosenHero) => {
+      if (chosenHero) sendHeroToAttack(chosenHero, t, formation);
+      else sendReinforcementsToAttack(t, formation);
+    }, { staminaCost: t.cost, allowReinforcement: true });
   }
 
   // ---- formation selection modal ----
@@ -4254,6 +4335,12 @@
   // preview to a gather-rate estimate and requires at least 1 troop to send
   let formationFarmHub = null;
   let formationMinTroops = 0;
+  // hero-picker state — lets the player switch which hero (or "no hero, a
+  // reinforcement column") actually goes on this march, instead of it being
+  // locked to whatever was already selected on the map before the tap
+  let formationChosenHeroId = null;
+  let formationStaminaCost = 0;
+  let formationAllowReinforcement = false;
   const formationValues = {};
   const formationRowEls = {}; // role -> { renderTier }, rebuilt each time the modal opens
   const formationActiveTier = {}; // role -> currently-shown troop key, rebuilt each time the modal opens
@@ -4335,18 +4422,68 @@
     return row;
   }
 
+  // Builds the row of selectable heroes (+ a "Reinforcements" option where
+  // allowed) so the player can change who actually goes on this march
+  // without backing out of the modal — busy heroes and ones short on
+  // stamina for THIS action are shown but disabled, not just hidden, so
+  // it's clear why they're not pickable.
+  function renderFormationHeroPicker() {
+    const el = document.getElementById('formationHeroPicker');
+    el.innerHTML = '';
+    const options = heroes.map(h => {
+      const busy = h.state !== 'idle';
+      const shortStamina = !busy && formationStaminaCost > 0 && h.stamina < formationStaminaCost;
+      return {
+        heroId: h.id, hero: h, disabled: busy || shortStamina,
+        label: h.name,
+        sub: busy ? 'busy' : shortStamina ? `${h.stamina} stamina (needs ${formationStaminaCost})` : `${h.stamina} stamina`,
+      };
+    });
+    if (formationAllowReinforcement) {
+      const free = canSendReinforcement();
+      options.push({ heroId: null, hero: null, disabled: !free, label: 'Reinforcements', sub: free ? 'no hero needed' : 'no slot free' });
+    }
+    if (options.length <= 1) { el.style.display = 'none'; return; }
+    el.style.display = 'flex';
+    options.forEach(opt => {
+      const pill = document.createElement('button');
+      pill.className = 'hero-pick-pill' + (opt.disabled ? ' disabled' : '') + (opt.heroId === formationChosenHeroId ? ' active' : '');
+      pill.innerHTML = `${opt.label}<span class="hero-pick-pill-sub">${opt.sub}</span>`;
+      if (opt.disabled) {
+        pill.disabled = true;
+      } else {
+        pill.addEventListener('click', () => {
+          formationChosenHeroId = opt.heroId;
+          formationCurrentHero = opt.hero;
+          renderFormationHeroPicker();
+          updateFormationSubText();
+          updateFormationPreview();
+        });
+      }
+      el.appendChild(pill);
+    });
+  }
+
+  function updateFormationSubText() {
+    const withWhom = formationCurrentHero ? 'with your hero' : 'as a reinforcement column, no hero needed';
+    document.getElementById('formationSub').textContent = formationFarmHub
+      ? `Troops stay deployed ${withWhom} while they farm — more troops sent means faster gathering.`
+      : `Send troops ${withWhom}. Only what you send is at risk. Enforcers beat Gunners, Gunners beat Drivers, Drivers beat Enforcers.`;
+  }
+
   function openFormationModal(hero, title, onConfirm, opts) {
     opts = opts || {};
     formationCurrentHero = hero;
+    formationChosenHeroId = hero ? hero.id : null;
     formationOnConfirm = onConfirm;
     formationOddsTarget = opts.oddsTarget || null;
     formationFarmHub = opts.farmHub || null;
     formationMinTroops = opts.minTroops || 0;
+    formationStaminaCost = opts.staminaCost || 0;
+    formationAllowReinforcement = !!opts.allowReinforcement;
     document.getElementById('formationTitle').textContent = title;
-    const withWhom = hero ? 'with your hero' : 'as a reinforcement column, no hero needed';
-    document.getElementById('formationSub').textContent = formationFarmHub
-      ? `Troops stay deployed ${withWhom} while they farm — more troops sent means faster gathering.`
-      : `Send troops ${withWhom}. Only what you send is at risk. Enforcers beat Gunners, Gunners beat Drivers, Drivers beat Enforcers.`;
+    renderFormationHeroPicker();
+    updateFormationSubText();
 
     const rowsContainer = document.getElementById('formationRows');
     rowsContainer.innerHTML = '';
@@ -4366,6 +4503,9 @@
   function closeFormationModal() {
     document.getElementById('formationModal').classList.remove('open');
     formationCurrentHero = null;
+    formationChosenHeroId = null;
+    formationStaminaCost = 0;
+    formationAllowReinforcement = false;
     formationOnConfirm = null;
     formationOddsTarget = null;
     formationFarmHub = null;
@@ -4453,15 +4593,21 @@
     const cap = maxDeployable();
     const capText = ` (${totalSent}/${cap} sent)`;
     const sendBtn = document.getElementById('formationSendBtn');
+    // the picker can leave the CURRENT pick invalid (its default was a hero
+    // who's short on stamina, or reinforcements got picked but the last
+    // free slot filled up elsewhere) — block Send rather than let a bad
+    // pick through just because the player never touched the picker
+    const pickInvalid = (formationCurrentHero && formationStaminaCost > 0 && formationCurrentHero.stamina < formationStaminaCost)
+      || (!formationCurrentHero && formationAllowReinforcement && !canSendReinforcement());
     if (formationFarmHub) {
       const rate = hubGatherRate(formationFarmHub, hubTotalTroops(formationFarmHub) + totalSent);
       document.getElementById('formationPreview').textContent = (totalSent > 0
         ? `Gather rate: ${rate.toFixed(1)}/s`
         : 'Send at least 1 troop to farm this tile.') + capText;
-      sendBtn.disabled = totalSent < formationMinTroops;
+      sendBtn.disabled = totalSent < formationMinTroops || pickInvalid;
       return;
     }
-    sendBtn.disabled = false;
+    sendBtn.disabled = pickInvalid;
     // rivalPower()/rivalComposition() rather than raw .power/.composition —
     // a Boss Mansion's real numbers only exist through those helpers (see
     // the rivalBases block above), and both helpers fall back to a plain
@@ -4500,9 +4646,10 @@
   document.getElementById('formationSendBtn').addEventListener('click', () => {
     if (formationTotal(formationValues) < formationMinTroops) return;
     const callback = formationOnConfirm;
+    const chosenHero = formationCurrentHero;
     const formation = { ...formationValues };
     closeFormationModal();
-    if (callback) callback(formation);
+    if (callback) callback(formation, chosenHero);
   });
 
   // Shown only as a last resort — every idle hero was already checked (see
@@ -4893,9 +5040,6 @@
     const speedBtn = document.getElementById('speedBtn');
     speedBtn.textContent = `Upgrade — ${speedUpgradeCost()} silver`;
     speedBtn.disabled = state.coins < speedUpgradeCost();
-
-    const potionBtn = document.getElementById('potionBtn');
-    potionBtn.disabled = state.coins < 100;
 
     document.getElementById('layoutTokenMeta').textContent =
       `Have ${inventory['Layout Token'] || 0}. Spend one at the Camp to freely rearrange every building.`;
@@ -5567,6 +5711,24 @@
     });
     gearCard.appendChild(gearBtn);
     convenienceList.appendChild(gearCard);
+
+    const RECALL_ORDER_PRICE = 250;
+    const recallCard = document.createElement('div');
+    recallCard.className = 'item-card';
+    recallCard.innerHTML = `<div class="item-info"><div class="item-name">Recall Order</div><div class="item-meta">Have ${inventory['Recall Order'] || 0}. Instantly pulls a busy hero home mid-march — tap them on the map to use one. Troops return safely, no fight resolves.</div></div>`;
+    const recallBtn = document.createElement('button');
+    recallBtn.className = 'gold-btn';
+    recallBtn.textContent = `Buy — ${RECALL_ORDER_PRICE} silver`;
+    recallBtn.disabled = state.coins < RECALL_ORDER_PRICE;
+    recallBtn.addEventListener('click', () => {
+      if (state.coins < RECALL_ORDER_PRICE) return;
+      state.coins -= RECALL_ORDER_PRICE;
+      inventory['Recall Order'] = (inventory['Recall Order'] || 0) + 1;
+      addLog('Bought a Recall Order.', 'win', 'building');
+      render();
+    });
+    recallCard.appendChild(recallBtn);
+    convenienceList.appendChild(recallCard);
   }
 
   function applyReduceMotionSetting() {
@@ -5634,6 +5796,13 @@
   }
 
   function renderHeroesRoom() {
+    // periodic re-renders (passive resource ticks fire render() roughly once
+    // a second) were tearing down and rebuilding this room's DOM — including
+    // the gear <select> — out from under the player mid-interaction, which
+    // force-closes a native dropdown before a tap can register on an option.
+    // Skip the rebuild entirely while a gear select is focused/open; the
+    // room re-renders again normally the moment focus moves away (blur below).
+    if (document.activeElement && document.activeElement.classList.contains('hero-gear-select')) return;
     const list = document.getElementById('heroUpgradeList');
     list.innerHTML = '';
     heroes.forEach(hero => {
@@ -5651,29 +5820,38 @@
       card.innerHTML = `
         <div class="item-info">
           <div class="item-name" style="color:${hero.style.trim}">${hero.name} — Level ${hero.level}</div>
-          <div class="item-meta">Attack power ${heroPower(hero)}. Next level: ${coinCost} silver + ${fmtResourceCost(resCost)}.</div>
+          <div class="item-meta">Attack power ${heroPower(hero)}. Stamina ${Math.floor(hero.stamina)}/${heroMaxStamina(hero)} (+${HERO_LEVEL_STAMINA_BONUS} max stamina next level). Next level: ${coinCost} silver + ${fmtResourceCost(resCost)}.</div>
           <select class="hero-gear-select">${gearOptionsHtml}</select>
         </div>
       `;
-      card.querySelector('.hero-gear-select').addEventListener('change', (e) => {
+      const gearSelect = card.querySelector('.hero-gear-select');
+      gearSelect.addEventListener('change', (e) => {
         hero.equippedGear = e.target.value || null;
         addLog(hero.equippedGear
           ? `${hero.name} equipped ${GEAR_TYPES.find(g => g.key === hero.equippedGear).label}.`
           : `${hero.name} unequipped their gear.`, 'win', 'building');
         render();
       });
+      // catches up on anything the skip-while-focused guard above deferred
+      gearSelect.addEventListener('blur', () => render());
       const btn = document.createElement('button');
       btn.className = 'gold-btn';
-      btn.textContent = 'Level Up';
-      btn.disabled = !affordable;
-      btn.addEventListener('click', () => {
-        if (state.coins < heroUpgradeCoinCost(hero) || !hasResources(heroUpgradeResourceCost(hero))) return;
-        state.coins -= heroUpgradeCoinCost(hero);
-        spendResources(heroUpgradeResourceCost(hero));
-        hero.level += 1;
-        addLog(`${hero.name} leveled up to ${hero.level}. Attack power now ${heroPower(hero)}.`, 'win', 'building');
-        render();
-      });
+      if (hero.level >= MAX_LEVEL) {
+        btn.textContent = 'Max Level';
+        btn.disabled = true;
+      } else {
+        btn.textContent = 'Level Up';
+        btn.disabled = !affordable;
+        btn.addEventListener('click', () => {
+          if (hero.level >= MAX_LEVEL) return;
+          if (state.coins < heroUpgradeCoinCost(hero) || !hasResources(heroUpgradeResourceCost(hero))) return;
+          state.coins -= heroUpgradeCoinCost(hero);
+          spendResources(heroUpgradeResourceCost(hero));
+          hero.level += 1;
+          addLog(`${hero.name} leveled up to ${hero.level}. Attack power now ${heroPower(hero)}.`, 'win', 'building');
+          render();
+        });
+      }
       card.appendChild(btn);
       list.appendChild(card);
     });
@@ -5686,7 +5864,7 @@
     const lootList = document.getElementById('lootList');
     const items = Object.keys(inventory).filter(name => inventory[name] > 0);
     if (!items.length) {
-      lootList.innerHTML = '<div class="quest-progress">Nothing picked up yet — buy a Skin of Wine at the Forge, or find loot from raider kills.</div>';
+      lootList.innerHTML = '<div class="quest-progress">Nothing picked up yet — buy a Skin of Wine at the Market, or find loot from raider kills.</div>';
     } else {
       lootList.innerHTML = '';
       items.forEach(name => {
@@ -6028,14 +6206,6 @@
     render();
   });
 
-  document.getElementById('potionBtn').addEventListener('click', () => {
-    if (state.coins < 100) return;
-    state.coins -= 100;
-    inventory['Skin of Wine'] = (inventory['Skin of Wine'] || 0) + 1;
-    addLog('Bought a Skin of Wine — check your Provisions to use it.', 'win', 'building');
-    render();
-  });
-
   document.getElementById('layoutTokenBtn').addEventListener('click', () => {
     if (state.coins < 300) return;
     state.coins -= 300;
@@ -6057,6 +6227,16 @@
     heroes.forEach(h => { if (h.stamina < heroMaxStamina(h)) { h.stamina += 1; changed = true; } });
     if (changed) render();
   }, 3000);
+
+  // The deploy overlay's countdowns previously only refreshed as a side
+  // effect of something ELSE changing (a march state transition, a passive
+  // resource tick) — an account with no passive production running and a
+  // long attack/raid/seize march out could go the entire walk with a frozen,
+  // un-updating row, which read as "it doesn't show" even though a row was
+  // technically there. A dedicated tick guarantees every active deployment
+  // (farming, attacking, raiding, seizing, scouting, garrisoning) stays
+  // live regardless of anything else happening.
+  setInterval(renderDeployOverlay, 1000);
 
   setInterval(() => {
     let changed = false;
@@ -6239,6 +6419,18 @@
   const SAVE_KEY = 'syndicate-map-save-v1';
   function msRemaining(ts) { return Math.max(0, ts - performance.now()); }
 
+  // How long the app was actually closed for, in real wall-clock time — set
+  // once at the top of applySavePayload() and read everywhere a saved
+  // "remaining ms" gets turned back into an absolute performance.now()-based
+  // timestamp. Previously every timer/march/cooldown/hub was saved as "time
+  // remaining" and restored as "now + that same remaining time" — meaning
+  // NOTHING in the game ever advanced while the app was closed, no matter
+  // how long that was; reopening after 3 days looked identical to reopening
+  // after 3 seconds. This makes real time actually pass while you're away,
+  // the way every other idle/strategy game works.
+  let offlineElapsedMs = 0;
+  function catchUpMs(remainMs) { return Math.max(0, (remainMs || 0) - offlineElapsedMs); }
+
   // hero.march holds absolute performance.now()-based timestamps, which are
   // meaningless after a reload (the clock resets to 0) — save/restore them
   // the same "time remaining" way the game already handles build/train timers
@@ -6266,11 +6458,11 @@
       formation: sm.formation ? { ...sm.formation } : null,
       fromX: sm.fromX, fromY: sm.fromY, toX: sm.toX, toY: sm.toY,
       arrived: !!sm.arrived, resolved: !!sm.resolved,
-      departAt: now + sm.departRemainMs,
-      arriveAt: now + sm.arriveRemainMs,
-      resolveAt: sm.resolveRemainMs != null ? now + sm.resolveRemainMs : null,
-      returnDepartAt: sm.returnDepartRemainMs != null ? now + sm.returnDepartRemainMs : null,
-      returnArriveAt: sm.returnArriveRemainMs != null ? now + sm.returnArriveRemainMs : null,
+      departAt: now + catchUpMs(sm.departRemainMs),
+      arriveAt: now + catchUpMs(sm.arriveRemainMs),
+      resolveAt: sm.resolveRemainMs != null ? now + catchUpMs(sm.resolveRemainMs) : null,
+      returnDepartAt: sm.returnDepartRemainMs != null ? now + catchUpMs(sm.returnDepartRemainMs) : null,
+      returnArriveAt: sm.returnArriveRemainMs != null ? now + catchUpMs(sm.returnArriveRemainMs) : null,
       returnToX: sm.returnToX, returnToY: sm.returnToY,
     };
   }
@@ -6278,6 +6470,9 @@
   function buildSavePayload() {
     return {
       v: 1,
+      // real wall-clock time this save was made — the ONE thing every catch-up
+      // calculation on load is anchored to (see offlineElapsedMs/catchUpMs)
+      lastSaveEpochMs: Date.now(),
       state: {
         level: state.level, xp: state.xp, xpToLevel: state.xpToLevel,
         coins: state.coins, speedLevel: state.speedLevel,
@@ -6380,6 +6575,10 @@
   }
 
   function applySavePayload(save) {
+    // Date.now() (real wall-clock time) is what lets this span a closed
+    // app/device — performance.now() resets to 0 on every fresh page load,
+    // so it can't tell you how long you were actually gone.
+    offlineElapsedMs = save.lastSaveEpochMs ? Math.max(0, Date.now() - save.lastSaveEpochMs) : 0;
     Object.assign(state, {
       level: save.state.level, xp: save.state.xp, xpToLevel: save.state.xpToLevel,
       coins: save.state.coins, speedLevel: save.state.speedLevel,
@@ -6393,24 +6592,37 @@
       fieldLevels: save.state.fieldLevels || { lumber: 1, food: 1, water: 1 },
       campLayout: save.state.campLayout || {},
       gear: save.state.gear || { blade: 0, ward: 0, banner: 0 },
-      relocateReadyAt: performance.now() + (save.state.relocateRemainMs || 0),
+      relocateReadyAt: performance.now() + catchUpMs(save.state.relocateRemainMs),
       capacityBoostPct: save.state.capacityBoostPct || 0,
-      capacityBoostEndsAt: performance.now() + (save.state.capacityBoostRemainMs || 0),
-      buildSlotBoostEndsAt: performance.now() + (save.state.buildSlotBoostRemainMs || 0),
-      researchSlotBoostEndsAt: performance.now() + (save.state.researchSlotBoostRemainMs || 0),
+      capacityBoostEndsAt: performance.now() + catchUpMs(save.state.capacityBoostRemainMs),
+      buildSlotBoostEndsAt: performance.now() + catchUpMs(save.state.buildSlotBoostRemainMs),
+      researchSlotBoostEndsAt: performance.now() + catchUpMs(save.state.researchSlotBoostRemainMs),
       avatarKey: save.state.avatarKey || 'default',
       formationPresets: (save.state.formationPresets || [null, null, null, null, null]).map(p => p ? { ...p } : null),
       settings: { autoOpenCamp: true, reduceMotion: false, notifyBuildDone: false, notifyRaided: false, soundEnabled: false, ...(save.state.settings || {}) },
-      dailyReadyAt: performance.now() + save.state.dailyRemainMs,
+      dailyReadyAt: performance.now() + catchUpMs(save.state.dailyRemainMs),
       eventPoints: save.state.eventPoints,
-      eventEndsAt: performance.now() + save.state.eventRemainMs,
+      eventEndsAt: performance.now() + catchUpMs(save.state.eventRemainMs),
       governorHeld: !!save.state.governorHeld,
-      governorCycleEndsAt: performance.now() + (save.state.governorCycleRemainMs != null ? save.state.governorCycleRemainMs : GOVERNOR_CYCLE_MS),
+      governorCycleEndsAt: performance.now() + catchUpMs(save.state.governorCycleRemainMs != null ? save.state.governorCycleRemainMs : GOVERNOR_CYCLE_MS),
     });
     Object.assign(state.resources, save.state.resources);
     if (state.resources.fuel == null) state.resources.fuel = 0;
     if (save.state.baseX != null) BASE.x = save.state.baseX;
     if (save.state.baseY != null) BASE.y = save.state.baseY;
+
+    // Oil Press / field-plot production are the same "continuous tick, no
+    // end-timestamp" shape as stamina/farming above — credit the real time
+    // that passed directly rather than only ticking once the app reopens.
+    if (offlineElapsedMs > 0) {
+      const cap = resourceCap();
+      const secs = offlineElapsedMs / 1000;
+      if (garageOutput() > 0) state.resources.fuel = Math.min(cap, state.resources.fuel + garageOutput() * secs);
+      FIELD_TYPES.forEach(field => {
+        const perHour = fieldResourceTotalPerHour(field.key);
+        if (perHour > 0) state.resources[field.key] = Math.min(cap, state.resources[field.key] + (perHour / 3600) * secs);
+      });
+    }
 
     if (save.state.troopTypes) {
       const saved = save.state.troopTypes;
@@ -6454,6 +6666,12 @@
       }
       heroes.push(h);
     });
+    // Stamina regen is a continuous tick (+1 every 3s) with no end-timestamp
+    // of its own to catch up the way a march does — credit it directly for
+    // whatever real time actually passed, same reasoning as farming below.
+    if (offlineElapsedMs > 0) {
+      heroes.forEach(h => { h.stamina = Math.min(heroMaxStamina(h), h.stamina + Math.floor(offlineElapsedMs / 3000)); });
+    }
     selectedId = save.selectedId;
 
     extraMarches.length = 0;
@@ -6489,7 +6707,7 @@
       const t = targets.find(tt => tt.name === st.name);
       if (!t) return;
       t.health = st.health;
-      t.deadUntil = performance.now() + st.deadRemainMs;
+      t.deadUntil = performance.now() + catchUpMs(st.deadRemainMs);
       if (st.x != null) t.x = st.x;
       if (st.y != null) t.y = st.y;
       if (st.homeX != null) t.homeX = st.homeX;
@@ -6505,7 +6723,7 @@
       const rb = rivalBases.find(rr => rr.name === srb.name);
       if (rb) {
         rb.scouted = srb.scouted;
-        rb.defeatedUntil = performance.now() + srb.deadRemainMs;
+        rb.defeatedUntil = performance.now() + catchUpMs(srb.deadRemainMs);
         if (srb.x != null) rb.x = srb.x;
         if (srb.y != null) rb.y = srb.y;
       }
@@ -6522,8 +6740,39 @@
       // same as a freshly generated hub.
       if (shb.reservePct != null) h.reserve = Math.round(h.maxReserve * Math.max(0, Math.min(1, shb.reservePct)));
       else h.reserve = h.maxReserve;
-      h.depletedUntil = performance.now() + (shb.depletedRemainMs || 0);
+      h.depletedUntil = performance.now() + catchUpMs(shb.depletedRemainMs);
     });
+
+    // Farming has no end-timestamp to catch up the way a march does (it's
+    // an open-ended tick, not a discrete departAt/arriveAt pair) — credit
+    // whatever real time actually passed directly, once, right here. Capped
+    // at however long the tile could have actually sustained that rate for,
+    // so a very long gap correctly empties the tile and recalls the
+    // farmer(s) instead of producing more than the tile ever held.
+    if (offlineElapsedMs > 0) {
+      hubs.forEach(hub => {
+        if (performance.now() < hub.depletedUntil) return;
+        const farmers = [...heroes, ...extraMarches].filter(f => f.state === 'farming' && f.farmingHub === hub.id);
+        if (!farmers.length) return;
+        const rate = hubGatherRate(hub, hubTotalTroops(hub));
+        if (rate <= 0) return;
+        const maxDrainMs = (hub.reserve / rate) * 1000;
+        const gained = rate * (Math.min(offlineElapsedMs, maxDrainMs) / 1000);
+        const key = hubResourceKey(hub);
+        if (key === 'gold') state.coins += gained;
+        else state.resources[key] = Math.min(resourceCap(), state.resources[key] + gained);
+        hub.reserve = Math.max(0, hub.reserve - gained);
+        if (hub.reserve <= 0) {
+          hub.reserve = hub.maxReserve;
+          hub.depletedUntil = performance.now() + hubRegenMs(hub);
+          relocateHub(hub);
+          farmers.forEach(f => {
+            addLog(`${f.name}'s crew tapped out ${hub.name} while you were away — recalled home.`, 'lose', 'combat');
+            recallHero(f);
+          });
+        }
+      });
+    }
 
     if (save.governor) {
       GOVERNOR.power = save.governor.power || rollGovernorPower();
@@ -6550,7 +6799,7 @@
       if (saved) {
         timers[key] = {
           startedAt: performance.now() - (saved.totalMs - saved.remainMs),
-          endsAt: performance.now() + saved.remainMs,
+          endsAt: performance.now() + catchUpMs(saved.remainMs),
           meta: saved.meta || null,
         };
       } else {
