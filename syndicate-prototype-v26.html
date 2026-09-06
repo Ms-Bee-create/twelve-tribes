@@ -2126,11 +2126,19 @@
   }
   function mansionBuildMs() { return Math.round(270000 * Math.pow(state.mansionLevel, 1.5) * (1 - researchBonusPct('build_speed'))); }
   function mansionRequirement() {
-    return { barracks: state.mansionLevel, heroLevel: Math.max(0, (state.mansionLevel - 1) * 2) };
+    // Camp can't advance past its current level until every core support
+    // building has caught up to that same level first — same two-part
+    // ceiling/gate loop Mafia City and Rise of Kingdoms use for their
+    // Mansion/City Hall.
+    const target = state.mansionLevel;
+    return {
+      buildings: CORE_REQUIREMENT_BUILDINGS.map(b => ({ key: b.key, label: b.label, required: target, have: state[b.key] })),
+      heroLevel: Math.max(0, (state.mansionLevel - 1) * 2),
+    };
   }
   function mansionReqMet() {
     const req = mansionRequirement();
-    return state.barracksLevel >= req.barracks && state.level >= req.heroLevel;
+    return req.buildings.every(b => b.have >= b.required) && state.level >= req.heroLevel;
   }
 
   function recruitCost() { return 300 * heroes.length; }
@@ -2270,6 +2278,17 @@
   // Soft cap for now on every leveled building and every research project —
   // headroom to grow into, not a hand-tuned final balance.
   const MAX_LEVEL = 100;
+  // Camp (mansion) is a hard ceiling on the 5 core support buildings, same as
+  // Mansion/City Hall in Mafia City / Rise of Kingdoms — keeps any one stat
+  // from being maxed while the Camp itself lags behind.
+  function campCeiling() { return Math.min(MAX_LEVEL, state.mansionLevel); }
+  const CORE_REQUIREMENT_BUILDINGS = [
+    { key: 'barracksLevel', label: 'Muster Ground' },
+    { key: 'hospitalLevel', label: 'Hospital' },
+    { key: 'warehouseLevel', label: 'Storehouse' },
+    { key: 'garageLevel', label: 'Oil Press' },
+    { key: 'researchLevel', label: "Scribes' Tent" },
+  ];
   const RESEARCH_ITEMS = (() => {
     const projects = [
       { key: 'gather_speed',       category: 'Economy', label: 'Efficient Routes',   desc: 'Boosts how fast your crews gather from resource tiles.' },
@@ -5225,13 +5244,15 @@
 
     const req = mansionRequirement();
     const met = mansionReqMet();
-    const barracksOk = state.barracksLevel >= req.barracks;
     const heroOk = state.level >= req.heroLevel;
     const mansionRes = mansionResourceCost();
     const mansionResOk = hasResources(mansionRes);
     document.getElementById('mansionMeta').innerHTML =
       `Level ${state.mansionLevel} — +${(state.mansionLevel - 1) * 15} max stamina.<br>` +
-      `<span class="item-req ${barracksOk ? 'met' : ''}">${barracksOk ? '✓' : '✗'} Muster level ${req.barracks} (you have ${state.barracksLevel})</span><br>` +
+      req.buildings.map(b => {
+        const ok = b.have >= b.required;
+        return `<span class="item-req ${ok ? 'met' : ''}">${ok ? '✓' : '✗'} ${b.label} level ${b.required} (you have ${b.have})</span><br>`;
+      }).join('') +
       (req.heroLevel > 0
         ? `<span class="item-req ${heroOk ? 'met' : ''}">${heroOk ? '✓' : '✗'} Account level ${req.heroLevel} (you have ${state.level})</span><br>`
         : `<span class="item-req met">✓ No hero-level requirement yet</span><br>`) +
@@ -5403,6 +5424,9 @@
     } else if (state.hospitalLevel >= MAX_LEVEL) {
       hospitalBtn.textContent = 'Max Level';
       hospitalBtn.disabled = true;
+    } else if (state.hospitalLevel >= campCeiling()) {
+      hospitalBtn.textContent = `Camp Lv${campCeiling() + 1} required`;
+      hospitalBtn.disabled = true;
     } else if (!canStartBuildTimer()) {
       hospitalBtn.textContent = 'Upgrade — build queue full';
       hospitalBtn.disabled = true;
@@ -5459,6 +5483,9 @@
     } else if (state.warehouseLevel >= MAX_LEVEL) {
       warehouseBtn.textContent = 'Max Level';
       warehouseBtn.disabled = true;
+    } else if (state.warehouseLevel >= campCeiling()) {
+      warehouseBtn.textContent = `Camp Lv${campCeiling() + 1} required`;
+      warehouseBtn.disabled = true;
     } else if (!canStartBuildTimer()) {
       warehouseBtn.textContent = 'Upgrade — build queue full';
       warehouseBtn.disabled = true;
@@ -5481,6 +5508,9 @@
       garageBtn.disabled = state.coins < cost;
     } else if (state.garageLevel >= MAX_LEVEL) {
       garageBtn.textContent = 'Max Level';
+      garageBtn.disabled = true;
+    } else if (state.garageLevel >= campCeiling()) {
+      garageBtn.textContent = `Camp Lv${campCeiling() + 1} required`;
       garageBtn.disabled = true;
     } else if (!canStartBuildTimer()) {
       garageBtn.textContent = 'Upgrade — build queue full';
@@ -5532,6 +5562,9 @@
       siteBtn.disabled = state.coins < cost;
     } else if (siteLevel >= MAX_LEVEL) {
       siteBtn.textContent = 'Max Level';
+      siteBtn.disabled = true;
+    } else if (siteLevel >= campCeiling()) {
+      siteBtn.textContent = `Camp Lv${campCeiling() + 1} required`;
       siteBtn.disabled = true;
     } else if (!canStartBuildTimer()) {
       siteBtn.textContent = 'Upgrade — build queue full';
@@ -5641,6 +5674,9 @@
       labBtn.disabled = state.coins < cost;
     } else if (state.researchLevel >= MAX_LEVEL) {
       labBtn.textContent = 'Max Level';
+      labBtn.disabled = true;
+    } else if (state.researchLevel >= campCeiling()) {
+      labBtn.textContent = `Camp Lv${campCeiling() + 1} required`;
       labBtn.disabled = true;
     } else if (!canStartBuildTimer()) {
       labBtn.textContent = 'Upgrade — build queue full';
@@ -6312,6 +6348,7 @@
       return;
     }
     if (state.hospitalLevel >= MAX_LEVEL) return;
+    if (state.hospitalLevel >= campCeiling()) return;
     if (!canStartBuildTimer()) return;
     const resCost = hospitalResourceCost();
     if (!hasResources(resCost)) { showResourceShortfall(resCost); return; }
@@ -6369,6 +6406,7 @@
       return;
     }
     if (state.warehouseLevel >= MAX_LEVEL) return;
+    if (state.warehouseLevel >= campCeiling()) return;
     if (!canStartBuildTimer()) return;
     const resCost = warehouseResourceCost();
     if (!hasResources(resCost)) { showResourceShortfall(resCost); return; }
@@ -6389,6 +6427,7 @@
       return;
     }
     if (state.garageLevel >= MAX_LEVEL) return;
+    if (state.garageLevel >= campCeiling()) return;
     if (!canStartBuildTimer()) return;
     const resCost = garageResourceCost();
     if (!hasResources(resCost)) { showResourceShortfall(resCost); return; }
@@ -6419,6 +6458,7 @@
       return;
     }
     if (state.researchLevel >= MAX_LEVEL) return;
+    if (state.researchLevel >= campCeiling()) return;
     if (!canStartBuildTimer()) return;
     const resCost = researchLabResourceCost();
     if (!hasResources(resCost)) { showResourceShortfall(resCost); return; }
@@ -6444,6 +6484,7 @@
         return;
       }
       if (state.fieldLevels[field.key] >= MAX_LEVEL) return;
+      if (state.fieldLevels[field.key] >= campCeiling()) return;
       if (!canStartBuildTimer()) return;
       const resCost = fieldSiteResourceCost(field);
       if (!hasResources(resCost)) { showResourceShortfall(resCost); return; }
