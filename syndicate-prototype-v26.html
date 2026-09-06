@@ -2358,7 +2358,11 @@
 
   function powerRating() {
     const heroLevelSum = heroes.reduce((sum, h) => sum + h.level, 0);
-    const troopSum = totalActiveTroops();
+    // Rise of Kingdoms' own formula is "troops x troop power," not a flat
+    // count — a tier-III Rider is worth more power than a tier-I Shieldbearer,
+    // same as it already is in real combat via tierMult. Previously every
+    // troop counted as exactly 1 point regardless of tier.
+    const troopSum = TROOP_TYPES.reduce((sum, t) => sum + state.troopTypes[t.key].active * t.tierMult, 0);
     const fieldLevelSum = FIELD_TYPES.reduce((sum, f) => sum + state.resourceBuildings[f.key].reduce((s, l) => s + l, 0), 0);
     const fieldSiteLevelSum = FIELD_TYPES.reduce((sum, f) => sum + state.fieldLevels[f.key], 0);
     const gearTierSum = GEAR_TYPES.reduce((sum, g) => sum + state.gear[g.key], 0);
