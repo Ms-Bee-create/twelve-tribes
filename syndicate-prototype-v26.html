@@ -792,7 +792,7 @@
   <div class="mansion-panel">
     <div class="mansion-header">
       <div class="mansion-header-left">
-        <span class="mansion-title">The Camp</span>
+        <span class="mansion-title" id="mansionTitle">The Camp</span>
         <span class="mansion-coins" id="mansionCoinsBadge">💰 100</span>
       </div>
       <button class="modal-close" id="rearrangeBtn" style="display:none">Rearrange</button>
@@ -4090,6 +4090,7 @@
     campCanvas.classList.remove('hidden');
     document.getElementById('closeModal').textContent = '← Back to Map';
     document.getElementById('rearrangeBtn').style.display = 'inline-block';
+    document.getElementById('mansionTitle').textContent = 'The Camp';
     resizeCampCanvas();
     drawCampScene();
   }
@@ -4110,11 +4111,20 @@
     else showCampOverview();
   });
 
+  // Settings has no physical building in CAMP_BUILDINGS (it's only reachable
+  // via the Avatar, not a door in the overview scene) — everything else
+  // already has a real in-theme name there, reused here instead of every
+  // room page just repeating "The Camp" at the top.
+  function roomDisplayName(room) {
+    const building = CAMP_BUILDINGS.find(b => b.room === room);
+    return building ? building.label : (room === 'settings' ? 'Settings' : 'The Camp');
+  }
   function switchRoom(room) {
     campView = room;
     campCanvas.classList.add('hidden');
     document.getElementById('closeModal').textContent = '← Back to Overview';
     document.getElementById('rearrangeBtn').style.display = 'none';
+    document.getElementById('mansionTitle').textContent = roomDisplayName(room);
     ROOM_IDS.forEach(r => {
       document.getElementById('room-' + r).style.display = (r === room) ? 'block' : 'none';
     });
@@ -7289,6 +7299,7 @@
       x: BASE.x, y: BASE.y,
       power: powerRating(),
       level: state.level, // account level — server needs this for heroSkillMultiplier
+      mansion_level: state.mansionLevel, // so other players' maps can show/scale a real Camp, not a fixed generic icon
       hero_levels: heroes.map(h => h.level),
       troops: JSON.parse(JSON.stringify(state.troopTypes)),
       ...mpBuildMarchSnapshot(),
@@ -7546,15 +7557,27 @@
 
   function drawOtherPlayer(p) {
     const x = p.x, y = p.y;
+    // Every other real player used to render as the exact same fixed-size
+    // icon no matter how far along they actually were — "his camp is
+    // growing but I don't see that on my end, it still looks small." Scale
+    // the icon itself with his real synced Camp level (capped so it stays
+    // readable at very high levels, same spirit as the estate's own growth
+    // curve) instead of just adding a text label nobody would notice.
+    const campLvl = p.mansion_level || 1;
+    const scale = 1 + Math.min(1.5, (campLvl - 1) * 0.03);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
     ctx.fillStyle = '#2a3a4a';
-    ctx.fillRect(x - 13, y - 8, 26, 16);
+    ctx.fillRect(-13, -8, 26, 16);
     ctx.strokeStyle = 'rgba(143,163,189,0.7)';
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(x - 13, y - 8, 26, 16);
+    ctx.lineWidth = 1.5 / scale;
+    ctx.strokeRect(-13, -8, 26, 16);
     ctx.fillStyle = '#5b7ba0';
     ctx.beginPath();
-    ctx.moveTo(x - 16, y - 8); ctx.lineTo(x, y - 20); ctx.lineTo(x + 16, y - 8);
+    ctx.moveTo(-16, -8); ctx.lineTo(0, -20); ctx.lineTo(16, -8);
     ctx.closePath(); ctx.fill();
+    ctx.restore();
 
     const walkPos = otherPlayerWalkPos(p);
     if (walkPos) {
@@ -7571,13 +7594,16 @@
       ctx.fillStyle = '#ede6db';
       ctx.font = '600 11px Inter, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(p.display_name, x, y - 26);
+      ctx.fillText(p.display_name, x, y - 26 * scale);
+      ctx.fillStyle = '#c9a24b';
+      ctx.font = '600 10px Inter, sans-serif';
+      ctx.fillText(`Camp Lv${campLvl}`, x, y - 26 * scale + 12);
       ctx.fillStyle = '#8fa3bd';
       ctx.font = '500 10px Inter, sans-serif';
-      ctx.fillText(`Power ${Math.round(effectiveDefense(p.troops))} · real player`, x, y + 26);
+      ctx.fillText(`Power ${Math.round(effectiveDefense(p.troops))} · real player`, x, y + 26 * scale);
       ctx.fillStyle = '#8a8073';
       ctx.font = '500 8px monospace';
-      ctx.fillText(`X ${Math.round(x)}, Y ${Math.round(y)}`, x, y + 38);
+      ctx.fillText(`X ${Math.round(x)}, Y ${Math.round(y)}`, x, y + 38 * scale);
     }
   }
 

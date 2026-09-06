@@ -26,6 +26,7 @@ create table players (
   x double precision not null,
   y double precision not null,
   power integer not null default 0,
+  mansion_level integer not null default 1,
   hero_levels jsonb not null default '[]'::jsonb,
   troops jsonb not null default '{"enforcer":{"active":0,"wounded":0},"gunner":{"active":0,"wounded":0},"driver":{"active":0,"wounded":0}}'::jsonb,
   updated_at timestamptz not null default now()
