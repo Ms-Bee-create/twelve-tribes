@@ -108,7 +108,9 @@
     pointer-events: auto;
   }
   .power-badge {
-    position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    /* below the resource strip (10px top padding + 30px pill height), not
+       overlapping it — was sitting at the same 8px band as the resources */
+    position: absolute; top: 48px; left: 50%; transform: translateX(-50%);
     font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 14px;
     border: 1px solid rgba(201,162,75,0.5);
     background: rgba(21,18,15,0.85);
@@ -1387,8 +1389,8 @@
     return item;
   }
 
-  const WORLD_W = 2900, WORLD_H = 1600;
-  const BASE = { x: 260, y: 560 };
+  const WORLD_W = 2900, WORLD_H = 2400; // Y stretched 1.5x — was a cramped 1600, made the map feel "short" once a phone's narrow-width zoom fix left little vertical room to pan (see the commit message for the full diagnosis)
+  const BASE = { x: 260, y: 840 };
   const HERO_NAMES = ["Vega", "Marlowe", "Ruiz"];
   const HERO_STYLES = [
     { outfit: '#8c2f39', trim: '#e0bc6f', weapon: 'bat' },
@@ -1398,10 +1400,10 @@
   const MAX_HEROES = 3;
 
   const targets = [
-    { name: "Desert Marauders",   x: 150, y: 400, cost: 15, maxHealth: 30,  coinPerHp: 0.6, xpKill: 16,  color: '#7a8a6b', respawnMs: 4000,  icon: 'claws',  region: { x1: 50,  y1: 250, x2: 450,  y2: 600 }, composition: { enforcer: 0.15, gunner: 0.25, driver: 0.60 } },
-    { name: "Amalekite Raiders",  x: 500, y: 400, cost: 18, maxHealth: 70,  coinPerHp: 0.7, xpKill: 34,  color: '#8f7a4b', respawnMs: 6000,  icon: 'fist',   region: { x1: 350, y1: 250, x2: 850,  y2: 700 }, composition: { enforcer: 0.60, gunner: 0.25, driver: 0.15 } },
-    { name: "Midianite Host",     x: 160, y: 160, cost: 22, maxHealth: 130, coinPerHp: 0.8, xpKill: 58,  color: '#a15a3f', respawnMs: 8000,  icon: 'blade',  region: { x1: 50,  y1: 20,  x2: 650,  y2: 320 }, composition: { enforcer: 0.20, gunner: 0.60, driver: 0.20 } },
-    { name: "Philistine Garrison", x: 700, y: 130, cost: 26, maxHealth: 240, coinPerHp: 0.9, xpKill: 100, color: '#8c2f39', respawnMs: 12000, icon: 'skull',  region: { x1: 550, y1: 20,  x2: 1350, y2: 400 }, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
+    { name: "Desert Marauders",   x: 150, y: 600, cost: 15, maxHealth: 30,  coinPerHp: 0.6, xpKill: 16,  color: '#7a8a6b', respawnMs: 4000,  icon: 'claws',  region: { x1: 50,  y1: 375, x2: 450,  y2: 900 }, composition: { enforcer: 0.15, gunner: 0.25, driver: 0.60 } },
+    { name: "Amalekite Raiders",  x: 500, y: 600, cost: 18, maxHealth: 70,  coinPerHp: 0.7, xpKill: 34,  color: '#8f7a4b', respawnMs: 6000,  icon: 'fist',   region: { x1: 350, y1: 375, x2: 850,  y2: 1050 }, composition: { enforcer: 0.60, gunner: 0.25, driver: 0.15 } },
+    { name: "Midianite Host",     x: 160, y: 240, cost: 22, maxHealth: 130, coinPerHp: 0.8, xpKill: 58,  color: '#a15a3f', respawnMs: 8000,  icon: 'blade',  region: { x1: 50,  y1: 30,  x2: 650,  y2: 480 }, composition: { enforcer: 0.20, gunner: 0.60, driver: 0.20 } },
+    { name: "Philistine Garrison", x: 700, y: 195, cost: 26, maxHealth: 240, coinPerHp: 0.9, xpKill: 100, color: '#8c2f39', respawnMs: 12000, icon: 'skull',  region: { x1: 550, y1: 30,  x2: 1350, y2: 600 }, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
   ].map(t => ({ ...t, health: t.maxHealth, deadUntil: 0, homeX: t.x, homeY: t.y }));
 
   function relocateTarget(t) {
@@ -1415,7 +1417,7 @@
   // HUB_REGEN_MS_PER_LEVEL below) rather than a flat per-tier lookup — see
   // generateHubs().
 
-  const DESERT = { x1: 1780, y1: 150, x2: 2890, y2: 1500 };
+  const DESERT = { x1: 1780, y1: 225, x2: 2890, y2: 2250 };
   function inDesert(x, y) { return x >= DESERT.x1 && x <= DESERT.x2 && y >= DESERT.y1 && y <= DESERT.y2; }
 
   // small deterministic PRNG (mulberry32) — same seed every load, so the
@@ -1454,8 +1456,8 @@
   // relocates within its tier band on respawn instead of refilling in place
   // (see relocateHub below) — so the map genuinely isn't static.
   const HUB_TIER_REGIONS = {
-    1: { x1: 50,  y1: 300, x2: 700,  y2: 1000 },
-    2: { x1: 680, y1: 100, x2: 1150, y2: 720 },
+    1: { x1: 50,  y1: 450, x2: 700,  y2: 1500 },
+    2: { x1: 680, y1: 150, x2: 1150, y2: 1080 },
     3: DESERT,
   };
   const HUB_TYPES = [
@@ -1490,10 +1492,10 @@
   function generateHubs() {
     const rng = mulberry32(WORLD_SEED);
     // seed the collision check with BASE and the City Gate's fixed spot
-    // (1620,700 — kept in sync with GOVERNOR.x/y below, hardcoded here since
+    // (1620,1050 — kept in sync with GOVERNOR.x/y below, hardcoded here since
     // GOVERNOR isn't declared yet at this point in the file) so no tile can
     // land close enough to steal a tap from either one
-    const placed = [{ x: BASE.x, y: BASE.y }, { x: 1620, y: 700 }];
+    const placed = [{ x: BASE.x, y: BASE.y }, { x: 1620, y: 1050 }];
     const result = [];
     [1, 2, 3].forEach(tier => {
       const region = HUB_TIER_REGIONS[tier];
@@ -1564,7 +1566,7 @@
   // exact same shape/machinery, so the map feels populated everywhere and not
   // just at 4 fixed encounters — matching the real "kingdom map" genre.
   const SCATTERED_CAMP_COUNT = 12;
-  const SCATTERED_CAMP_REGION = { x1: 400, y1: 50, x2: 2850, y2: 1550 };
+  const SCATTERED_CAMP_REGION = { x1: 400, y1: 75, x2: 2850, y2: 2325 };
   // Real Old Testament personal names, framed as if each camp belongs to a
   // specific rival — matching how a real signed-in player's camp would show
   // a display name, rather than reading as 12 copies of a generic label.
@@ -1596,19 +1598,19 @@
     return camps;
   }
   const rivalBases = [
-    { name: "Moabite Outpost",     region: { x1: 950,  y1: 550, x2: 1250, y2: 800 },  power: 24, cost: 30, cashMin: 120, cashMax: 220, resType: 'lumber', resAmt: 40, respawnMs: 20000, composition: { enforcer: 0.15, gunner: 0.25, driver: 0.60 } },
-    { name: "Ammonite Stronghold", region: { x1: 1200, y1: 750, x2: 1500, y2: 1050 }, power: 44, cost: 35, cashMin: 260, cashMax: 420, resType: 'food',   resAmt: 65, respawnMs: 28000, composition: { enforcer: 0.60, gunner: 0.25, driver: 0.15 } },
-    { name: "Edomite Watch",       region: { x1: 1350, y1: 250, x2: 1650, y2: 550 },  power: 68, cost: 40, cashMin: 500, cashMax: 780, resType: 'water',  resAmt: 90, respawnMs: 38000, composition: { enforcer: 0.20, gunner: 0.60, driver: 0.20 } },
-    { name: "Canaanite Citadel",   region: { x1: 1500, y1: 900, x2: 1700, y2: 1150 }, power: 95, cost: 45, cashMin: 900, cashMax: 1400, resType: 'gold', resAmt: 0, respawnMs: 50000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
+    { name: "Moabite Outpost",     region: { x1: 950,  y1: 825, x2: 1250, y2: 1200 },  power: 24, cost: 30, cashMin: 120, cashMax: 220, resType: 'lumber', resAmt: 40, respawnMs: 20000, composition: { enforcer: 0.15, gunner: 0.25, driver: 0.60 } },
+    { name: "Ammonite Stronghold", region: { x1: 1200, y1: 1125, x2: 1500, y2: 1575 }, power: 44, cost: 35, cashMin: 260, cashMax: 420, resType: 'food',   resAmt: 65, respawnMs: 28000, composition: { enforcer: 0.60, gunner: 0.25, driver: 0.15 } },
+    { name: "Edomite Watch",       region: { x1: 1350, y1: 375, x2: 1650, y2: 825 },  power: 68, cost: 40, cashMin: 500, cashMax: 780, resType: 'water',  resAmt: 90, respawnMs: 38000, composition: { enforcer: 0.20, gunner: 0.60, driver: 0.20 } },
+    { name: "Canaanite Citadel",   region: { x1: 1500, y1: 1350, x2: 1700, y2: 1725 }, power: 95, cost: 45, cashMin: 900, cashMax: 1400, resType: 'gold', resAmt: 0, respawnMs: 50000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
     // Boss Mansions: 3 fixed, always-relevant encounters. Their power/composition
     // are computed LIVE (see rivalPower()/rivalComposition() below) off your own
     // powerRating() and dominant troop role, instead of a fixed number baked in
     // at generation time — so they never fall behind as you grow, and stacking
     // one troop type doesn't trivially win. `power`/`composition` here are just
     // unused placeholders (every real read goes through the helpers).
-    { name: "Goliath's Bastion",         isBoss: true, bossMult: 0.85, region: { x1: 900,  y1: 1100, x2: 1200, y2: 1400 }, power: 0, cost: 50, cashMin: 2000, cashMax: 2800, resType: 'gold', resAmt: 0, respawnMs: 120000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
-    { name: "Og of Bashan's Fortress",   isBoss: true, bossMult: 1.0,  region: { x1: 2000, y1: 800,  x2: 2300, y2: 1100 }, power: 0, cost: 50, cashMin: 2600, cashMax: 3400, resType: 'gold', resAmt: 0, respawnMs: 120000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
-    { name: "Sennacherib's Legion",      isBoss: true, bossMult: 1.15, region: { x1: 2400, y1: 200,  x2: 2800, y2: 600 },  power: 0, cost: 50, cashMin: 3200, cashMax: 4200, resType: 'gold', resAmt: 0, respawnMs: 120000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
+    { name: "Goliath's Bastion",         isBoss: true, bossMult: 0.85, region: { x1: 900,  y1: 1650, x2: 1200, y2: 2100 }, power: 0, cost: 50, cashMin: 2000, cashMax: 2800, resType: 'gold', resAmt: 0, respawnMs: 120000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
+    { name: "Og of Bashan's Fortress",   isBoss: true, bossMult: 1.0,  region: { x1: 2000, y1: 1200, x2: 2300, y2: 1650 }, power: 0, cost: 50, cashMin: 2600, cashMax: 3400, resType: 'gold', resAmt: 0, respawnMs: 120000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
+    { name: "Sennacherib's Legion",      isBoss: true, bossMult: 1.15, region: { x1: 2400, y1: 300,  x2: 2800, y2: 900 },  power: 0, cost: 50, cashMin: 3200, cashMax: 4200, resType: 'gold', resAmt: 0, respawnMs: 120000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
     ...generateScatteredCamps(),
   ].map(rb => ({ ...rb, x: 0, y: 0, scouted: false, defeatedUntil: 0, flashUntil: 0, flashColor: null }));
 
@@ -1633,7 +1635,7 @@
   function rollGovernorPower() { return 55 + Math.floor(Math.random() * 45); }
   const GOVERNOR = {
     name: "City Gate",
-    x: 1620, y: 700,
+    x: 1620, y: 1050,
     power: rollGovernorPower(),
     composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 }, // the city guard's baseline lean while unheld
     scouted: false,
@@ -1660,7 +1662,7 @@
   ];
   function generateScatteredMarauders() {
     const rng = mulberry32(WORLD_SEED + 3);
-    const placed = [{ x: BASE.x, y: BASE.y }, { x: 1620, y: 700 }, ...hubs, ...rivalBases, ...targets];
+    const placed = [{ x: BASE.x, y: BASE.y }, { x: 1620, y: 1050 }, ...hubs, ...rivalBases, ...targets];
     const result = [];
     [1, 2, 3].forEach(tier => {
       const region = HUB_TIER_REGIONS[tier];
@@ -1701,6 +1703,13 @@
   let zoom = window.innerWidth ? Math.max(ZOOM_MIN, Math.min(1, window.innerWidth / 800)) : 1;
   let placingMansion = false;
   let showLabels = true; // hidden while actively panning/pinching so the terrain isn't buried in text
+  // the power badge is a DOM element, not a canvas-drawn label, so it needs
+  // its own visibility toggle alongside every place showLabels changes
+  function setShowLabels(v) {
+    showLabels = v;
+    const powerLabel = document.getElementById('powerLabel');
+    if (powerLabel) powerLabel.style.display = v ? '' : 'none';
+  }
 
   const gameScreen = document.getElementById('gameScreen');
   const canvas = document.getElementById('map');
@@ -4927,7 +4936,7 @@
     const dx = (clientX - drag.lastX) * scaleX, dy = (clientY - drag.lastY) * scaleY;
     if (Math.hypot(clientX - drag.lastX, clientY - drag.lastY) > DRAG_THRESHOLD) drag.moved = true;
     if (drag.moved) {
-      showLabels = false;
+      setShowLabels(false);
       camera.x -= dx / zoom; camera.y -= dy / zoom;
       clampCamera();
       drag.lastX = clientX; drag.lastY = clientY;
@@ -4936,7 +4945,7 @@
   function dragEnd(clientX, clientY) {
     if (!drag.active) return;
     canvas.style.cursor = 'grab';
-    showLabels = true;
+    setShowLabels(true);
     if (!drag.moved) {
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
@@ -4970,7 +4979,7 @@
   canvas.addEventListener('touchstart', (e) => {
     if (e.touches.length === 2) {
       drag.active = false;
-      showLabels = false;
+      setShowLabels(false);
       pinchStartDist = touchDist(e.touches[0], e.touches[1]);
       pinchStartZoom = zoom;
     } else if (e.touches.length === 1) {
@@ -4995,7 +5004,7 @@
   canvas.addEventListener('touchend', (e) => {
     e.preventDefault();
     if (e.touches.length < 2) pinchStartDist = null;
-    if (e.touches.length === 0) showLabels = true;
+    if (e.touches.length === 0) setShowLabels(true);
     if (drag.active && e.touches.length === 0 && e.changedTouches.length) {
       const t = e.changedTouches[0]; dragEnd(t.clientX, t.clientY);
     }
