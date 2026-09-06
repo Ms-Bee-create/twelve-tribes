@@ -1154,6 +1154,10 @@
         <div class="help-entry-desc">Scout first (free), then raid. Losing costs stamina and nothing else; winning pays out silver and sometimes resources. Named rivals and generic Raider Camps both relocate after being defeated.</div>
       </div>
       <div class="help-entry">
+        <div class="help-entry-name">Syndicates</div>
+        <div class="help-entry-desc">Attackable solo — no troops required, just a hero. Killing one has a chance to drop Forge crafting materials, and each syndicate icon always drops materials for the SAME gear item: claws → Blade of the Tribe, blade → Ward of the Covenant, fist and skull → Banner of Endurance (two sources for that one). Generic scattered targets share the same 4 icons, so they're just as farmable as the 4 named ones.</div>
+      </div>
+      <div class="help-entry">
         <div class="help-entry-name">The City Gate</div>
         <div class="help-entry-desc">Whoever holds it collects a steady bonus until someone else takes it. Contested by everyone — signed in or not.</div>
       </div>
@@ -1379,11 +1383,16 @@
     { points: 30, reward: 900 },
   ];
 
+  // Each syndicate icon supplies the FULL material set for exactly one Forge
+  // gear item (Banner needs 3 materials and gets 2 syndicate sources so
+  // there's always a second place to grind it) — deliberately no partial
+  // sets and no orphaned materials, so "attack X to get Y gear" is always a
+  // clean, true statement. Matches GEAR_TYPES below one-for-one.
   const LOOT_TABLE = {
-    claws:  ["Torn Cloak", "Bronze Knuckle-Guard"],
-    fist:   ["Iron-Tipped Club", "Worn Tunic"],
-    blade:  ["Curved Dagger", "Camel Driver's Satchel"], // was 'anchor' — matches the retitled icon
-    skull:  ["Brass Signet Ring", "Sealed Scroll"],
+    claws:  ["Torn Cloak", "Bronze Knuckle-Guard"],               // Blade of the Tribe
+    blade:  ["Curved Dagger", "Camel Driver's Satchel"],          // Ward of the Covenant (was 'anchor' icon — matches the retitled icon)
+    fist:   ["Iron-Tipped Club", "Worn Tunic", "Brass Signet Ring"],  // Banner of Endurance
+    skull:  ["Iron-Tipped Club", "Worn Tunic", "Brass Signet Ring"],  // Banner of Endurance (2nd source)
   };
   const inventory = {}; // itemName -> count
 
@@ -1686,7 +1695,10 @@
           xpKill: Math.round(16 * mult),
           color: '#7a6a4b',
           respawnMs: Math.round(4000 * mult),
-          icon: 'blade',
+          // cycle through all 4 syndicate icons (was hardcoded to 'blade' for
+          // every scattered target) so all 3 Forge gears are actually
+          // farmable from generic targets, not just the 4 named lore ones
+          icon: ['claws', 'fist', 'blade', 'skull'][result.length % 4],
           region,
           composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 },
           health: maxHealth, deadUntil: 0, homeX: spot.x, homeY: spot.y,
@@ -2167,9 +2179,9 @@
   // between whichever's been crafted. Tiers scale the same way troop tiers
   // do: each level costs more materials and grants a bigger flat bonus.
   const GEAR_TYPES = [
-    { key: 'blade',  label: 'Blade of the Tribe',   materials: ['Torn Cloak', 'Bronze Knuckle-Guard'],                    bonusPerTier: 8,    desc: 'Attack' },
-    { key: 'ward',   label: 'Ward of the Covenant', materials: ['Curved Dagger', "Camel Driver's Satchel"],               bonusPerTier: 0.06, desc: 'Losses' },
-    { key: 'banner', label: 'Banner of Endurance',  materials: ['Iron-Tipped Club', 'Worn Tunic', 'Brass Signet Ring'],   bonusPerTier: 15,   desc: 'Stamina' },
+    { key: 'blade',  label: 'Blade of the Tribe',   materials: ['Torn Cloak', 'Bronze Knuckle-Guard'],                    bonusPerTier: 8,    desc: 'Attack',  source: 'Desert Marauders (claws)' },
+    { key: 'ward',   label: 'Ward of the Covenant', materials: ['Curved Dagger', "Camel Driver's Satchel"],               bonusPerTier: 0.06, desc: 'Losses', source: 'Midianite Host (blade)' },
+    { key: 'banner', label: 'Banner of Endurance',  materials: ['Iron-Tipped Club', 'Worn Tunic', 'Brass Signet Ring'],   bonusPerTier: 15,   desc: 'Stamina', source: 'Amalekite Raiders (fist) or Philistine Garrison (skull)' },
   ];
   function gearUpgradeCoinCost(gearKey) { return 200 * (state.gear[gearKey] + 1); }
   function gearUpgradeMaterialCost(gearKey) {
@@ -5853,7 +5865,7 @@
       info.className = 'item-info';
       info.innerHTML = `
         <div class="item-name">${g.label}${tier > 0 ? ` — Tier ${tier}` : ''}</div>
-        <div class="item-meta">${bonusText}${maxed ? '' : `. Made from ${fmtMaterialCost(matCost)}`}.</div>
+        <div class="item-meta">${bonusText}${maxed ? '' : `. Made from ${fmtMaterialCost(matCost)}`}.${maxed ? '' : ` Drops from ${g.source} (also scattered generic targets sharing that icon).`}</div>
       `;
       card.appendChild(info);
 
