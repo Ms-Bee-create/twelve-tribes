@@ -50,6 +50,12 @@
     position: relative;
     width: 100%;
     height: 100vh;
+    /* 100vh on mobile Chrome measures the viewport as if the address bar
+       were hidden, not what's actually visible right now — which is
+       exactly what was clipping the top-right avatar under the real
+       address bar. 100dvh tracks the REAL current visible height and
+       overrides the line above on every browser that supports it. */
+    height: 100dvh;
     overflow: hidden;
     background: #191510;
   }
@@ -1685,8 +1691,14 @@
   targets.push(...generateScatteredMarauders());
 
   const camera = { x: 0, y: 0 };
-  let zoom = 1;
   const ZOOM_MIN = 0.5, ZOOM_MAX = 2.2;
+  // Zoom always resets to this default on every load (camera/zoom aren't
+  // persisted — see applySavePayload's comment on why). A flat 1.0 was tuned
+  // against a desktop-width test window; on a real narrow phone that's a
+  // genuinely cramped, overlapping-labels view of the map every single time
+  // the game is reopened, not a one-off preference to just pinch back out
+  // from. Scale the default down for a narrow viewport instead.
+  let zoom = window.innerWidth ? Math.max(ZOOM_MIN, Math.min(1, window.innerWidth / 800)) : 1;
   let placingMansion = false;
   let showLabels = true; // hidden while actively panning/pinching so the terrain isn't buried in text
 
