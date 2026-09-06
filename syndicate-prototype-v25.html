@@ -1,0 +1,3456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Syndicate — Prototype</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&family=Cormorant+Garamond:wght@500;600&display=swap');
+
+  :root {
+    --ink: #15120f;
+    --paper: #ede6db;
+    --paper-dim: #b8afa0;
+    --blood: #8c2f39;
+    --blood-bright: #b23a46;
+    --gold: #c9a24b;
+    --stone: #2a2521;
+    --stone-line: #4a4136;
+    --wood-dark: #241a12;
+    --wood-mid: #3a2a1c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+    background-image: radial-gradient(ellipse at top, rgba(140,47,57,0.08), transparent 60%);
+  }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 20px 16px 80px; }
+  h1 { font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 30px; letter-spacing: 0.5px; margin: 0 0 4px; }
+  .subtitle { color: var(--paper-dim); font-size: 14px; margin: 0 0 20px; line-height: 1.5; }
+
+  /* ---- fullscreen game screen ---- */
+  .game-screen {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+    background: #191510;
+  }
+  #map { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+
+  .hud-top {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    background: linear-gradient(180deg, rgba(10,8,6,0.85), rgba(10,8,6,0));
+    pointer-events: none;
+  }
+  .resource-strip {
+    display: flex; gap: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    pointer-events: auto;
+    flex: 1;
+  }
+  .resource-strip::-webkit-scrollbar { display: none; }
+  .res-pill {
+    flex: 0 0 auto;
+    display: flex; align-items: baseline; gap: 5px;
+    border: 1px solid var(--stone-line);
+    background: rgba(21,18,15,0.85);
+    padding: 6px 10px;
+    white-space: nowrap;
+  }
+  .res-pill.cash { border-color: rgba(201,162,75,0.5); }
+  .res-label { font-size: 10px; color: var(--paper-dim); }
+  .res-val { font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 13px; color: var(--paper); }
+  .res-pill.cash .res-val { color: var(--gold); }
+  .lvl-badge {
+    flex: 0 0 auto;
+    font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 12px;
+    border: 1px solid var(--stone-line);
+    background: rgba(21,18,15,0.85);
+    padding: 6px 10px;
+    pointer-events: auto;
+  }
+  .power-badge {
+    flex: 0 0 auto;
+    font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 12px;
+    border: 1px solid rgba(201,162,75,0.5);
+    background: rgba(21,18,15,0.85);
+    color: var(--gold);
+    padding: 6px 10px;
+    pointer-events: auto;
+  }
+
+  .hud-heroes {
+    position: absolute; top: 52px; right: 12px;
+    display: flex; gap: 6px;
+  }
+  .hero-portrait {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    border: 2px solid var(--stone-line);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 15px;
+    cursor: pointer;
+    position: relative;
+    background: rgba(21,18,15,0.85);
+  }
+  .hero-portrait.selected { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(201,162,75,0.35); }
+  .hero-portrait .stamina-ring {
+    position: absolute; bottom: -6px; left: 3px; right: 3px;
+    height: 3px; background: var(--stone); overflow: hidden;
+  }
+  .hero-portrait .stamina-ring-fill { height: 100%; background: linear-gradient(90deg, var(--gold), #e0bc6f); }
+  .hero-portrait.empty-slot {
+    border-style: dashed; color: var(--paper-dim); font-weight: 400; font-size: 18px;
+  }
+
+  .hud-side {
+    position: absolute; top: 50%; right: 12px; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .events-icon-btn {
+    border: 1px solid var(--stone-line);
+    background: rgba(21,18,15,0.85);
+    padding: 10px 11px;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .events-icon-btn:hover { border-color: var(--gold); }
+
+  .map-status {
+    position: absolute; bottom: 66px; left: 12px;
+    font-size: 12px; color: var(--paper-dim);
+    background: rgba(21,18,15,0.8); padding: 5px 10px;
+    border: 1px solid var(--stone-line); pointer-events: none;
+    max-width: 70%;
+  }
+  .coords-badge {
+    position: absolute; bottom: 66px; right: 12px;
+    font-size: 11px; font-family: monospace; color: var(--paper-dim);
+    background: rgba(21,18,15,0.8); padding: 5px 8px;
+    border: 1px solid var(--stone-line); pointer-events: none;
+  }
+
+  .deploy-overlay {
+    position: absolute; top: 96px; left: 12px;
+    display: flex; flex-direction: column; gap: 4px;
+    max-width: 62%;
+    pointer-events: none;
+  }
+  .deploy-row {
+    font-size: 11px; color: var(--paper-dim);
+    background: rgba(21,18,15,0.8); padding: 5px 9px;
+    border: 1px solid var(--stone-line);
+    border-left: 2px solid rgba(201,162,75,0.5);
+  }
+
+  .bottom-bar {
+    position: absolute; bottom: 12px; left: 12px; right: 12px;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+  }
+  .enter-mansion-btn {
+    font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 14px;
+    border: 1px solid rgba(201,162,75,0.6);
+    background: rgba(21,18,15,0.92);
+    color: var(--gold);
+    padding: 12px 20px;
+    cursor: pointer;
+  }
+  .enter-mansion-btn:hover { background: rgba(21,18,15,1); }
+  .zoom-btn {
+    font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 18px;
+    width: 40px; height: 40px;
+    border: 1px solid var(--stone-line);
+    background: rgba(21,18,15,0.92);
+    color: var(--paper);
+    cursor: pointer;
+    line-height: 1;
+  }
+  .zoom-btn:hover { border-color: var(--gold); }
+
+  /* ---- formation selection modal ---- */
+  .formation-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(10,8,6,0.85);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 20;
+    padding: 16px;
+  }
+  .formation-backdrop.open { display: flex; }
+  .formation-panel {
+    width: 100%; max-width: 420px;
+    background: linear-gradient(180deg, #1c1815, #171310);
+    border: 1px solid rgba(201,162,75,0.4);
+    padding: 20px;
+  }
+  .formation-title {
+    font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 19px;
+    color: var(--gold); margin-bottom: 4px;
+  }
+  .formation-sub { font-size: 12px; color: var(--paper-dim); margin-bottom: 18px; }
+  .formation-row { margin-bottom: 14px; }
+  .formation-row-label {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 13px; margin-bottom: 6px;
+  }
+  .formation-row-avail { font-size: 11px; color: var(--paper-dim); }
+  .formation-stepper { display: flex; align-items: center; gap: 6px; }
+  .formation-stepper input {
+    flex: 1; text-align: center;
+    font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 15px;
+    background: var(--stone); color: var(--paper);
+    border: 1px solid var(--stone-line);
+    padding: 8px 4px;
+  }
+  .stepper-btn {
+    font-family: 'Inter', sans-serif; font-weight: 600; font-size: 14px;
+    border: 1px solid var(--stone-line); background: var(--stone); color: var(--paper);
+    padding: 8px 12px; cursor: pointer;
+  }
+  .stepper-btn:hover { border-color: var(--gold); }
+  .stepper-btn.max-btn { font-size: 11px; padding: 8px 10px; }
+  .formation-preview {
+    font-size: 13px; color: var(--gold); font-weight: 600;
+    border-top: 1px solid var(--stone-line); padding-top: 12px; margin: 6px 0 16px;
+  }
+  .formation-actions { display: flex; gap: 10px; }
+  .formation-actions button { flex: 1; padding: 11px; }
+
+  .section-title {
+    font-family: 'Oswald', sans-serif; font-size: 16px; font-weight: 600;
+    margin: 24px 0 12px;
+  }
+
+  .log-panel { border: 1px solid var(--stone-line); background: #171310; padding: 4px 16px; max-height: 150px; overflow-y: auto; }
+  .log-entry { font-size: 13px; padding: 10px 0; border-bottom: 1px solid var(--stone-line); line-height: 1.4; }
+  .log-entry:last-child { border-bottom: none; }
+  .log-entry.win { color: var(--gold); }
+  .log-entry.lose { color: var(--paper-dim); }
+  .log-entry.hub { color: #8fa3bd; }
+  .log-entry.chip { color: #a3937d; }
+  .log-entry.crit { color: #ffffff; font-weight: 600; }
+  .log-empty { color: var(--paper-dim); font-size: 13px; padding: 16px 0; }
+
+  button {
+    font-family: 'Inter', sans-serif; font-weight: 600; font-size: 13px;
+    border: 1px solid var(--stone-line); background: var(--stone); color: var(--paper);
+    padding: 9px 14px; cursor: pointer; white-space: nowrap;
+  }
+  button:hover:not(:disabled) { border-color: var(--gold); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button.gold-btn { background: var(--gold); color: var(--ink); border-color: var(--gold); }
+  button.gold-btn:hover:not(:disabled) { background: #dcb663; }
+
+  /* ---- Mansion interior modal ---- */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: var(--ink);
+    display: none;
+    z-index: 10;
+    overflow-y: auto;
+  }
+  .modal-backdrop.open { display: block; }
+
+  .mansion-panel {
+    width: 100%;
+    min-height: 100vh;
+    background:
+      radial-gradient(ellipse at 50% -10%, rgba(201,162,75,0.16), transparent 55%),
+      repeating-linear-gradient(90deg, var(--wood-mid) 0px, var(--wood-mid) 38px, var(--wood-dark) 38px, var(--wood-dark) 40px);
+    position: relative;
+  }
+  .mansion-header {
+    padding: 20px 24px 14px;
+    background: linear-gradient(180deg, rgba(10,8,6,0.55), transparent);
+    border-bottom: 1px solid rgba(201,162,75,0.3);
+    display: flex; justify-content: space-between; align-items: baseline;
+    max-width: 640px; margin: 0 auto;
+  }
+  .mansion-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 28px; font-weight: 600; letter-spacing: 0.5px;
+    color: var(--paper);
+    text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  }
+  .modal-close { background: none; border: none; color: var(--paper-dim); font-size: 13px; padding: 4px 8px; text-decoration: underline; }
+  .modal-close:hover { color: var(--paper); border-color: transparent; }
+
+  /* ---- floor plan: doors into each room instead of flat tabs ---- */
+  .floor-plan {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 3px;
+    max-width: 640px; margin: 14px auto 0;
+    padding: 0 24px;
+  }
+  .door {
+    background: rgba(21,18,15,0.5);
+    border: 1px solid rgba(201,162,75,0.2);
+    border-top: 3px solid rgba(201,162,75,0.2);
+    padding: 12px 4px 9px;
+    text-align: center;
+    cursor: pointer;
+    color: var(--paper-dim);
+    font-family: 'Oswald', sans-serif;
+    font-size: 10.5px;
+    line-height: 1.3;
+  }
+  .door .door-icon { display: block; font-size: 18px; margin-bottom: 4px; }
+  .door.active {
+    background: rgba(21,18,15,0.92);
+    border-color: var(--gold);
+    border-top-color: var(--gold);
+    color: var(--gold);
+  }
+  .door:hover:not(.active) { border-color: rgba(201,162,75,0.5); color: var(--paper); }
+
+  .room-body {
+    border: 1px solid rgba(201,162,75,0.25);
+    border-top: none;
+    max-width: 592px; margin: 0 auto 24px;
+    padding: 20px 18px;
+    position: relative;
+    overflow: hidden;
+  }
+  /* each room gets its own floor/wall treatment, like actually walking in */
+  .room-body.theme-foyer { background: radial-gradient(ellipse at 50% 0%, rgba(201,162,75,0.14), rgba(15,12,9,0.85) 70%); }
+  .room-body.theme-barracks {
+    background:
+      repeating-linear-gradient(135deg, rgba(140,47,57,0.06) 0px, rgba(140,47,57,0.06) 10px, transparent 10px, transparent 20px),
+      rgba(15,12,9,0.85);
+  }
+  .room-body.theme-armory {
+    background:
+      repeating-linear-gradient(90deg, rgba(143,163,189,0.07) 0px, rgba(143,163,189,0.07) 14px, transparent 14px, transparent 28px),
+      rgba(13,15,17,0.88);
+  }
+  .room-body.theme-events { background: radial-gradient(ellipse at 50% 0%, rgba(201,162,75,0.1), rgba(15,12,9,0.85) 70%); }
+  .room-body.theme-inventory {
+    background:
+      repeating-linear-gradient(0deg, rgba(140,100,60,0.08) 0px, rgba(140,100,60,0.08) 3px, transparent 3px, transparent 26px),
+      rgba(18,14,10,0.88);
+  }
+  .room-body.theme-heroes { background: radial-gradient(ellipse at 50% 0%, rgba(178,58,70,0.12), rgba(15,12,9,0.85) 70%); }
+  .room-body.theme-hospital {
+    background:
+      linear-gradient(rgba(230,235,238,0.04), rgba(230,235,238,0.04)),
+      rgba(12,16,17,0.9);
+  }
+  .room-body.theme-warehouse {
+    background:
+      repeating-linear-gradient(45deg, rgba(193,125,63,0.07) 0px, rgba(193,125,63,0.07) 12px, transparent 12px, transparent 24px),
+      rgba(16,13,10,0.88);
+  }
+  .room-body.theme-garage {
+    background:
+      repeating-linear-gradient(90deg, rgba(90,90,95,0.09) 0px, rgba(90,90,95,0.09) 8px, transparent 8px, transparent 32px),
+      rgba(14,14,15,0.9);
+  }
+  .room-intro { font-size: 12px; color: var(--paper-dim); font-style: italic; margin: 0 0 14px; }
+
+  .item-card {
+    border: 1px solid var(--stone-line);
+    background: linear-gradient(180deg, rgba(42,37,33,0.6), rgba(26,22,19,0.6));
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .item-card:last-child { margin-bottom: 0; }
+  .item-info { flex: 1; padding-right: 12px; }
+  .item-name { font-family: 'Oswald', sans-serif; font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+  .item-meta { font-size: 11.5px; color: var(--paper-dim); line-height: 1.5; }
+  .item-req { color: var(--blood-bright); }
+  .item-req.met { color: #7a9a6b; }
+
+  .timer-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  .timer-track { flex: 1; height: 7px; background: var(--stone); border: 1px solid var(--stone-line); overflow: hidden; }
+  .timer-fill { height: 100%; background: linear-gradient(90deg, #8fa3bd, #6b7a8f); transition: width 0.3s linear; }
+  .bar-fill { height: 100%; transition: width 0.3s linear; }
+  .timer-label { font-size: 11px; color: var(--paper-dim); white-space: nowrap; }
+
+  .quest-row {
+    border: 1px solid var(--stone-line); background: rgba(26,22,19,0.5);
+    padding: 12px 14px; margin-bottom: 8px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .quest-row:last-child { margin-bottom: 0; }
+  .quest-info { flex: 1; padding-right: 10px; }
+  .quest-desc { font-size: 13px; margin-bottom: 4px; }
+  .quest-progress { font-size: 11px; color: var(--paper-dim); }
+  .sync-textarea {
+    width: 100%; box-sizing: border-box;
+    font-family: monospace; font-size: 10px;
+    background: var(--stone); color: var(--paper);
+    border: 1px solid var(--stone-line);
+    padding: 8px; resize: vertical;
+  }
+
+  .event-track { display: flex; gap: 8px; margin-top: 4px; }
+  .event-milestone {
+    flex: 1; text-align: center;
+    border: 1px solid var(--stone-line);
+    background: rgba(26,22,19,0.5);
+    padding: 10px 6px;
+    font-size: 11px;
+  }
+  .event-milestone.reached { border-color: var(--gold); background: rgba(201,162,75,0.12); }
+  .event-milestone .pts { color: var(--gold); font-weight: 600; display: block; margin-bottom: 2px; }
+  .crit-flag { color: #e0bc6f; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="game-screen" id="gameScreen">
+  <canvas id="map"></canvas>
+
+  <div class="hud-top">
+    <div class="resource-strip" id="resourceStrip">
+      <div class="res-pill cash"><span class="res-label">Cash</span><span class="res-val" id="coinTotal">100</span></div>
+      <div class="res-pill"><span class="res-label">Lumber</span><span class="res-val" id="resLumber">0</span></div>
+      <div class="res-pill"><span class="res-label">Food</span><span class="res-val" id="resFood">0</span></div>
+      <div class="res-pill"><span class="res-label">Water</span><span class="res-val" id="resWater">0</span></div>
+      <div class="res-pill"><span class="res-label">Fuel</span><span class="res-val" id="resFuel">0</span></div>
+    </div>
+    <span class="lvl-badge" id="levelLabel">Lv 1</span>
+    <span class="power-badge" id="powerLabel">⚡ 0</span>
+  </div>
+
+  <div class="hud-heroes" id="heroPortraits"></div>
+
+  <div class="deploy-overlay" id="deployOverlay" style="display:none"></div>
+
+  <div class="hud-side">
+    <button class="events-icon-btn" id="heroesIconBtn" title="Heroes">🏆</button>
+    <button class="events-icon-btn" id="inventoryIconBtn" title="Inventory">🎒</button>
+    <button class="events-icon-btn" id="storeIconBtn" title="Store">🏪</button>
+    <button class="events-icon-btn" id="eventsIconBtn" title="Events">📅</button>
+  </div>
+
+  <div class="map-status" id="mapStatus">Select a hero, then pick a target or hub.</div>
+  <div class="coords-badge" id="coordsBadge">X 0, Y 0</div>
+
+  <div class="bottom-bar">
+    <button class="zoom-btn" id="zoomOutBtn" title="Zoom out">−</button>
+    <button class="enter-mansion-btn" id="enterMansionBtn">🏛️ Enter Mansion</button>
+    <button class="zoom-btn" id="zoomInBtn" title="Zoom in">+</button>
+  </div>
+</div>
+
+<div class="formation-backdrop" id="formationModal">
+  <div class="formation-panel">
+    <div class="formation-title" id="formationTitle">Choose Your Formation</div>
+    <div class="formation-sub" id="formationSub">Send troops with your hero. Only what you send is at risk.</div>
+
+    <div class="formation-row" data-key="enforcer">
+      <div class="formation-row-label">
+        <span>Enforcers</span>
+        <span class="formation-row-avail" id="availEnforcer">0 available</span>
+      </div>
+      <div class="formation-stepper">
+        <button class="stepper-btn" data-step="-10" data-key="enforcer">−</button>
+        <input type="number" id="formEnforcer" min="0" value="0" readonly>
+        <button class="stepper-btn" data-step="10" data-key="enforcer">+</button>
+        <button class="stepper-btn max-btn" data-key="enforcer">Max</button>
+      </div>
+    </div>
+
+    <div class="formation-row" data-key="gunner">
+      <div class="formation-row-label">
+        <span>Gunners</span>
+        <span class="formation-row-avail" id="availGunner">0 available</span>
+      </div>
+      <div class="formation-stepper">
+        <button class="stepper-btn" data-step="-10" data-key="gunner">−</button>
+        <input type="number" id="formGunner" min="0" value="0" readonly>
+        <button class="stepper-btn" data-step="10" data-key="gunner">+</button>
+        <button class="stepper-btn max-btn" data-key="gunner">Max</button>
+      </div>
+    </div>
+
+    <div class="formation-row" data-key="driver">
+      <div class="formation-row-label">
+        <span>Drivers</span>
+        <span class="formation-row-avail" id="availDriver">0 available</span>
+      </div>
+      <div class="formation-stepper">
+        <button class="stepper-btn" data-step="-10" data-key="driver">−</button>
+        <input type="number" id="formDriver" min="0" value="0" readonly>
+        <button class="stepper-btn" data-step="10" data-key="driver">+</button>
+        <button class="stepper-btn max-btn" data-key="driver">Max</button>
+      </div>
+    </div>
+
+    <div class="formation-preview" id="formationPreview">Attack power: 12</div>
+
+    <div class="formation-actions">
+      <button id="formationCancelBtn">Cancel</button>
+      <button class="gold-btn" id="formationSendBtn">Send</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="subtitle">Drag the map to explore. Pinch or scroll to zoom. Click the mansion (or the button below the map) to step inside.</p>
+
+  <div class="section-title">Log</div>
+  <div class="log-panel" id="log"><div class="log-empty">No moves yet.</div></div>
+</div>
+
+<div class="modal-backdrop" id="mansionModal">
+  <div class="mansion-panel">
+    <div class="mansion-header">
+      <span class="mansion-title">The Mansion</span>
+      <button class="modal-close" id="closeModal">← Back to Map</button>
+    </div>
+
+    <div class="floor-plan">
+      <div class="door active" data-room="foyer"><span class="door-icon">🏛️</span>Foyer</div>
+      <div class="door" data-room="barracks"><span class="door-icon">🎯</span>Barracks</div>
+      <div class="door" data-room="hospital"><span class="door-icon">➕</span>Hospital</div>
+      <div class="door" data-room="warehouse"><span class="door-icon">📦</span>Warehouse</div>
+      <div class="door" data-room="garage"><span class="door-icon">⛽</span>Garage</div>
+      <div class="door" data-room="armory"><span class="door-icon">🥾</span>Armory</div>
+      <div class="door" data-room="heroes"><span class="door-icon">🏆</span>Heroes</div>
+      <div class="door" data-room="inventory"><span class="door-icon">🎒</span>Inventory</div>
+      <div class="door" data-room="events"><span class="door-icon">📅</span>Events</div>
+    </div>
+
+    <div class="room-body theme-foyer" id="room-foyer">
+      <p class="room-intro">The family seal hangs over the hearth. Every upgrade here is felt across the whole operation — and takes real time to finish.</p>
+      <div class="item-card" style="border-color:rgba(201,162,75,0.4);">
+        <div class="item-info">
+          <div class="item-name">Family Power</div>
+          <div class="item-meta" id="powerMeta">0 — every upgrade in the house feeds this number.</div>
+        </div>
+      </div>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Expand the Mansion</div>
+          <div class="item-meta" id="mansionMeta">Level 1 — more max stamina for every hero.</div>
+          <div class="timer-row" id="mansionTimerRow" style="display:none">
+            <div class="timer-track"><div class="bar-fill" id="mansionTimerFill" style="width:0%;background:linear-gradient(90deg,#8fa3bd,#6b7a8f)"></div></div>
+            <span class="timer-label" id="mansionTimerLabel">0s</span>
+          </div>
+        </div>
+        <button class="gold-btn" id="mansionBtn">Upgrade</button>
+      </div>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Recruit a Hero</div>
+          <div class="item-meta" id="recruitMeta">Have 1 of 3.</div>
+        </div>
+        <button class="gold-btn" id="recruitBtn">Recruit</button>
+      </div>
+      <div class="item-card" style="margin-top:16px; border-color:rgba(140,47,57,0.4);">
+        <div class="item-info">
+          <div class="item-name">Progress autosaves</div>
+          <div class="item-meta">Saved to this browser every few seconds — reopen this same file later and you'll pick up where you left off.</div>
+        </div>
+        <button id="resetBtn">Reset Progress</button>
+      </div>
+
+      <div class="item-card" style="display:block; margin-top:16px;">
+        <div class="item-name">Sync to Another Device</div>
+        <div class="item-meta" style="margin-bottom:10px;">Generate a code here, then paste it into the same room on your other device.</div>
+        <button class="gold-btn" id="exportBtn" style="margin-bottom:8px;">Generate Code</button>
+        <textarea id="exportCode" class="sync-textarea" readonly placeholder="Tap Generate Code, then copy the text that appears here." rows="3"></textarea>
+        <button id="copyExportBtn" style="margin-top:8px; display:none;">Copy Code</button>
+        <div id="exportStatus" class="quest-progress" style="margin-top:6px;"></div>
+
+        <div class="item-name" style="margin-top:18px;">Load a Code</div>
+        <div class="item-meta" style="margin-bottom:10px;">Paste a code generated on your other device. This replaces your progress here with that save.</div>
+        <textarea id="importCode" class="sync-textarea" placeholder="Paste your sync code here." rows="3"></textarea>
+        <button class="gold-btn" id="importBtn" style="margin-top:8px;">Load Code</button>
+        <div id="importStatus" class="quest-progress" style="margin-top:6px;"></div>
+      </div>
+    </div>
+
+    <div class="room-body theme-barracks" id="room-barracks" style="display:none">
+      <p class="room-intro">Three rows, three jobs — Enforcers up front, Gunners in the middle, Drivers in back. A balanced line beats a stack of one type. Nobody's allowed out to farm without at least one active troop somewhere in the line. Building and training both take real time.</p>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Barracks</div>
+          <div class="item-meta" id="barracksMeta">Level 1 — trains 25 troops per batch.</div>
+          <div class="timer-row" id="barracksTimerRow" style="display:none">
+            <div class="timer-track"><div class="bar-fill" id="barracksTimerFill" style="width:0%;background:linear-gradient(90deg,#8fa3bd,#6b7a8f)"></div></div>
+            <span class="timer-label" id="barracksTimerLabel">0s</span>
+          </div>
+        </div>
+        <button class="gold-btn" id="barracksBtn">Upgrade</button>
+      </div>
+      <div id="troopTrainList"></div>
+    </div>
+
+    <div class="room-body theme-events" id="room-events" style="display:none">
+      <p class="room-intro">Come back, do the work, get paid for it.</p>
+
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Daily Check-In</div>
+          <div class="item-meta" id="dailyMeta">Ready to claim.</div>
+        </div>
+        <button class="gold-btn" id="dailyBtn">Claim</button>
+      </div>
+
+      <div class="item-card" style="display:block">
+        <div class="item-name" style="margin-bottom:8px;">Weekly Push — Syndicate Purge</div>
+        <div class="item-meta" id="eventMeta">0 points earned this cycle.</div>
+        <div class="event-track" id="eventTrack"></div>
+      </div>
+
+      <div class="item-name" style="margin: 16px 0 8px;">Contracts</div>
+      <div id="questList"></div>
+    </div>
+
+    <div class="room-body theme-inventory" id="room-inventory" style="display:none">
+      <p class="room-intro">What's come off the map so far.</p>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Resources</div>
+          <div class="item-meta" id="invResourceMeta">Lumber 0 · Food 0 · Water 0</div>
+        </div>
+      </div>
+      <div class="item-name" style="margin: 16px 0 8px;">Items</div>
+      <div id="lootList"></div>
+    </div>
+
+    <div class="room-body theme-heroes" id="room-heroes" style="display:none">
+      <p class="room-intro">Train each hero up individually — a leveled hero hits harder in every fight, no matter which target they're sent at.</p>
+      <div id="heroUpgradeList"></div>
+    </div>
+
+    <div class="room-body theme-hospital" id="room-hospital" style="display:none">
+      <p class="room-intro">Troops don't just vanish when a fight goes bad — they end up here. Keep it staffed so they don't sit wounded for long.</p>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Hospital</div>
+          <div class="item-meta" id="hospitalMeta">Level 1 — heals 10 wounded troops per batch.</div>
+          <div class="timer-row" id="hospitalTimerRow" style="display:none">
+            <div class="timer-track"><div class="bar-fill" id="hospitalTimerFill" style="width:0%;background:linear-gradient(90deg,#8fa3bd,#6b7a8f)"></div></div>
+            <span class="timer-label" id="hospitalTimerLabel">0s</span>
+          </div>
+        </div>
+        <button class="gold-btn" id="hospitalBtn">Upgrade</button>
+      </div>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Treat the Wounded</div>
+          <div class="item-meta" id="healMeta">0 wounded troops waiting.</div>
+          <div class="timer-row" id="healTimerRow" style="display:none">
+            <div class="timer-track"><div class="bar-fill" id="healTimerFill" style="width:0%;background:linear-gradient(90deg,#8fa3bd,#6b7a8f)"></div></div>
+            <span class="timer-label" id="healTimerLabel">0s</span>
+          </div>
+        </div>
+        <button class="gold-btn" id="healBtn">Treat</button>
+      </div>
+    </div>
+
+    <div class="room-body theme-warehouse" id="room-warehouse" style="display:none">
+      <p class="room-intro">Raw resources sitting in the open cap out fast. This is the only thing that raises the ceiling.</p>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Warehouse</div>
+          <div class="item-meta" id="warehouseMeta">Level 1 — holds up to 500 of each resource.</div>
+          <div class="timer-row" id="warehouseTimerRow" style="display:none">
+            <div class="timer-track"><div class="bar-fill" id="warehouseTimerFill" style="width:0%;background:linear-gradient(90deg,#8fa3bd,#6b7a8f)"></div></div>
+            <span class="timer-label" id="warehouseTimerLabel">0s</span>
+          </div>
+        </div>
+        <button class="gold-btn" id="warehouseBtn">Upgrade</button>
+      </div>
+    </div>
+
+    <div class="room-body theme-garage" id="room-garage" style="display:none">
+      <p class="room-intro">The only place fuel comes from. Burn it to pick the mansion up and put it down somewhere new.</p>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Garage</div>
+          <div class="item-meta" id="garageMeta">Level 1 — produces 0.4 fuel/s.</div>
+          <div class="timer-row" id="garageTimerRow" style="display:none">
+            <div class="timer-track"><div class="bar-fill" id="garageTimerFill" style="width:0%;background:linear-gradient(90deg,#8fa3bd,#6b7a8f)"></div></div>
+            <span class="timer-label" id="garageTimerLabel">0s</span>
+          </div>
+        </div>
+        <button class="gold-btn" id="garageBtn">Upgrade</button>
+      </div>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Relocate the Mansion</div>
+          <div class="item-meta" id="relocateMeta">Costs 150 fuel. Pick a new spot on the map.</div>
+        </div>
+        <button class="gold-btn" id="relocateBtn">Relocate</button>
+      </div>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Current Coordinates</div>
+          <div class="item-meta" id="mansionCoordsMeta">X 0, Y 0</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="room-body theme-armory" id="room-armory" style="display:none">
+      <p class="room-intro">Boots and bottled second winds — nothing fancy, just what keeps a hero moving.</p>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Running Shoes</div>
+          <div class="item-meta" id="speedMeta">Current speed: level 1.</div>
+        </div>
+        <button class="gold-btn" id="speedBtn">Upgrade</button>
+      </div>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Stamina Potion</div>
+          <div class="item-meta">Adds one to your inventory. Restores 20 stamina when used — use it from the Inventory tab.</div>
+        </div>
+        <button class="gold-btn" id="potionBtn">Buy — 100 coins</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Demo speed note: real build/train/event timers would run hours to days.
+  // Everything here runs in seconds/minutes so the loop is actually testable.
+  const EVENT_DURATION_MS = 25 * 60 * 1000; // one "weekly push" cycle, demo speed
+  const DAILY_COOLDOWN_MS = 90 * 1000;     // demo speed daily check-in
+  const GOVERNOR_CYCLE_MS = 8 * 60 * 1000; // stands in for "every 3 days," demo speed
+
+  const state = {
+    level: 1, xp: 0, xpToLevel: 55,
+    coins: 100,
+    speedLevel: 1,
+    mansionLevel: 1,
+    barracksLevel: 1,
+    troopTypes: {
+      enforcer: { active: 0, wounded: 0 }, // front line — soaks the hits
+      gunner:   { active: 0, wounded: 0 }, // mid line — raw damage
+      driver:   { active: 0, wounded: 0 }, // back line — speed & crit
+    },
+    hospitalLevel: 1,
+    warehouseLevel: 1,
+    dailyReadyAt: 0,          // performance.now() timestamp; 0 = ready now
+    resources: { lumber: 0, food: 0, water: 0, fuel: 0 },
+    garageLevel: 1,
+    relocateReadyAt: 0,
+    eventPoints: 0,
+    eventEndsAt: performance.now() + EVENT_DURATION_MS,
+    governorHeld: false,      // true while you control the city
+    governorCycleEndsAt: performance.now() + GOVERNOR_CYCLE_MS,
+  };
+
+  const timers = {
+    mansion: null, barracks: null, hospital: null, heal: null, warehouse: null, garage: null,
+    train_enforcer: null, train_gunner: null, train_driver: null,
+  }; // each: { endsAt, totalMs }
+
+  const quests = [
+    { id: 'kills3', desc: 'Defeat 3 syndicate fights', target: 3, progress: 0, reward: 150, claimed: false },
+    { id: 'findTier2', desc: 'Farm a Tier 2 resource tile', target: 1, progress: 0, reward: 200, claimed: false },
+    { id: 'trainBatch', desc: 'Train a batch of troops', target: 1, progress: 0, reward: 120, claimed: false },
+  ];
+
+  const EVENT_MILESTONES = [
+    { points: 5, reward: 150 },
+    { points: 15, reward: 400 },
+    { points: 30, reward: 900 },
+  ];
+
+  const LOOT_TABLE = {
+    claws:  ["Torn Bandana", "Brass Knuckles"],
+    fist:   ["Lead Pipe", "Union Jacket"],
+    anchor: ["Dock Ledger", "Rusted Hook"],
+    skull:  ["Vantage Signet Ring", "Encrypted Ledger"],
+  };
+  const inventory = {}; // itemName -> count
+
+  function rollLoot(target) {
+    if (Math.random() > 0.3) return null;
+    const pool = LOOT_TABLE[target.icon] || [];
+    if (!pool.length) return null;
+    const item = pool[Math.floor(Math.random() * pool.length)];
+    inventory[item] = (inventory[item] || 0) + 1;
+    return item;
+  }
+
+  const WORLD_W = 2300, WORLD_H = 1400;
+  const BASE = { x: 260, y: 560 };
+  const HERO_NAMES = ["Vega", "Marlowe", "Ruiz"];
+  const HERO_STYLES = [
+    { outfit: '#8c2f39', trim: '#e0bc6f', weapon: 'bat' },
+    { outfit: '#2f4d6b', trim: '#a8c0d8', weapon: 'knife' },
+    { outfit: '#4d6b3a', trim: '#d8cf9c', weapon: 'pistol' },
+  ];
+  const MAX_HEROES = 3;
+
+  const targets = [
+    { name: "Alley Rats",        x: 150, y: 400, cost: 15, maxHealth: 30,  coinPerHp: 0.6, xpKill: 16,  color: '#7a8a6b', respawnMs: 4000,  icon: 'claws',  region: { x1: 50,  y1: 250, x2: 450,  y2: 600 } },
+    { name: "Iron Fist Crew",    x: 500, y: 400, cost: 18, maxHealth: 70,  coinPerHp: 0.7, xpKill: 34,  color: '#8f7a4b', respawnMs: 6000,  icon: 'fist',   region: { x1: 350, y1: 250, x2: 850,  y2: 700 } },
+    { name: "The Longshoremen",  x: 160, y: 160, cost: 22, maxHealth: 130, coinPerHp: 0.8, xpKill: 58,  color: '#a15a3f', respawnMs: 8000,  icon: 'anchor', region: { x1: 50,  y1: 20,  x2: 650,  y2: 320 } },
+    { name: "Vantage Syndicate", x: 700, y: 130, cost: 26, maxHealth: 240, coinPerHp: 0.9, xpKill: 100, color: '#8c2f39', respawnMs: 12000, icon: 'skull',  region: { x1: 550, y1: 20,  x2: 1350, y2: 400 } },
+  ].map(t => ({ ...t, health: t.maxHealth, deadUntil: 0, homeX: t.x, homeY: t.y }));
+
+  function relocateTarget(t) {
+    // syndicates fully relocate somewhere new in their tier's territory after
+    // every kill — bigger/tougher tiers roam a wider stretch of the map
+    t.x = t.region.x1 + Math.random() * (t.region.x2 - t.region.x1);
+    t.y = t.region.y1 + Math.random() * (t.region.y2 - t.region.y1);
+  }
+
+  // first-pass depletion numbers — tune by feel once this has been played
+  const HUB_TIER_RESERVE = { 1: 400, 2: 900, 3: 1800 };
+  const HUB_TIER_REGEN_MS = { 1: 60000, 2: 90000, 3: 150000 };
+
+  // Tier 1 sits close to home base. Tier 2 pays much better but you have to
+  // scroll out to find it — that's the "search the map" loop.
+  const hubs = [
+    { id: 'lumber',  name: "Lumber Camp",     x: 140, y: 480, level: 1, baseOutput: 1,   color: '#4d6b4f', tier: 1 },
+    { id: 'food',    name: "Food Farm",       x: 260, y: 430, level: 1, baseOutput: 1.2, color: '#c17d3f', tier: 1 },
+    { id: 'water',   name: "Water Well",      x: 400, y: 520, level: 1, baseOutput: 0.8, color: '#4a7a8c', tier: 1 },
+    { id: 'gold',    name: "Gold Vault",      x: 330, y: 470, level: 1, baseOutput: 1.5, color: '#c9a24b', tier: 1 },
+
+    { id: 'lumber2', name: "Old-Growth Camp", x: 820, y: 560, level: 1, baseOutput: 2.6, color: '#4d6b4f', tier: 2 },
+    { id: 'food2',   name: "Fertile Valley",  x: 880, y: 300, level: 1, baseOutput: 2.9, color: '#c17d3f', tier: 2 },
+    { id: 'water2',  name: "The Reservoir",   x: 980, y: 540, level: 1, baseOutput: 2.2, color: '#4a7a8c', tier: 2 },
+    { id: 'gold2',   name: "Bank Vault",      x: 930, y: 190, level: 1, baseOutput: 3.4, color: '#c9a24b', tier: 2 },
+
+    // Desert tier — spread far apart, pays the best, but the sand slows a hero down getting there.
+    { id: 'lumber3', name: "Dead Timber",     x: 1870, y: 280,  level: 1, baseOutput: 4.2, color: '#4d6b4f', tier: 3 },
+    { id: 'food3',   name: "Scrub Farm",      x: 2180, y: 560,  level: 1, baseOutput: 4.6, color: '#c17d3f', tier: 3 },
+    { id: 'water3',  name: "Desert Well",     x: 1900, y: 960,  level: 1, baseOutput: 3.6, color: '#4a7a8c', tier: 3 },
+    { id: 'gold3',   name: "Salt Flats",      x: 2220, y: 1180, level: 1, baseOutput: 5.2, color: '#c9a24b', tier: 3 },
+  // a tile's reserve drains as it's farmed and refills after a cooldown once
+  // tapped dry — bigger/better tiers hold more but also take longer to recover
+  ].map(h => ({
+    ...h,
+    maxReserve: HUB_TIER_RESERVE[h.tier],
+    reserve: HUB_TIER_RESERVE[h.tier],
+    depletedUntil: 0,
+  }));
+  const DESERT = { x1: 1780, y1: 150, x2: 2290, y2: 1300 };
+  function inDesert(x, y) { return x >= DESERT.x1 && x <= DESERT.x2 && y >= DESERT.y1 && y <= DESERT.y2; }
+  function hubResourceKey(h) { return h.id.replace(/\d+$/, ''); }
+  function hubOutput(h) { return +(h.baseOutput * h.level).toFixed(1); }
+  function hubById(id) { return hubs.find(h => h.id === id); }
+  // troops actually deployed with heroes currently farming this hub —
+  // this is what drives gather speed now, not just "a hero is standing here"
+  function hubTotalTroops(hub) {
+    return heroes.reduce((sum, h) => {
+      if (h.farmingHub === hub.id && h.formation) return sum + formationTotal(h.formation);
+      return sum;
+    }, 0);
+  }
+  // sending a full barracks batch (25 troops @ barracks lvl 1) doubles the base rate
+  function hubGatherRate(hub, totalTroops) {
+    return +(hubOutput(hub) * (1 + totalTroops / 25)).toFixed(2);
+  }
+  function hubRegenMs(hub) { return HUB_TIER_REGEN_MS[hub.tier]; }
+
+  // Rival mansions: NPC rival accounts scattered far out on the map. Unscouted,
+  // their strength is hidden — tap once to scout (free, no cost), tap again to
+  // raid. Losing costs stamina and nothing else; winning pays out big.
+  // Each one roams a region instead of sitting at a fixed spot — it relocates
+  // (and needs re-scouting) every time it respawns, so the map isn't static.
+  const rivalBases = [
+    { name: "Marrow Street Outfit", region: { x1: 950,  y1: 550, x2: 1250, y2: 800 },  power: 24, cost: 30, cashMin: 120, cashMax: 220, resType: 'lumber', resAmt: 40, respawnMs: 20000 },
+    { name: "Iron Gable Family",    region: { x1: 1200, y1: 750, x2: 1500, y2: 1050 }, power: 44, cost: 35, cashMin: 260, cashMax: 420, resType: 'food',   resAmt: 65, respawnMs: 28000 },
+    { name: "The Vantage Trust",    region: { x1: 1350, y1: 250, x2: 1650, y2: 550 },  power: 68, cost: 40, cashMin: 500, cashMax: 780, resType: 'water',  resAmt: 90, respawnMs: 38000 },
+    { name: "Obsidian Ring",        region: { x1: 1500, y1: 900, x2: 1700, y2: 1150 }, power: 95, cost: 45, cashMin: 900, cashMax: 1400, resType: 'gold', resAmt: 0, respawnMs: 50000 },
+  ].map(rb => ({ ...rb, x: 0, y: 0, scouted: false, defeatedUntil: 0, flashUntil: 0, flashColor: null }));
+
+  function rollGovernorPower() { return 55 + Math.floor(Math.random() * 45); }
+  const GOVERNOR = {
+    name: "Governor's Office",
+    x: 1620, y: 700,
+    power: rollGovernorPower(),
+    scouted: false,
+    flashUntil: 0, flashColor: null,
+  };
+
+  function relocateRivalBase(rb) {
+    rb.x = rb.region.x1 + Math.random() * (rb.region.x2 - rb.region.x1);
+    rb.y = rb.region.y1 + Math.random() * (rb.region.y2 - rb.region.y1);
+  }
+  rivalBases.forEach(relocateRivalBase);
+
+  const camera = { x: 0, y: 0 };
+  let zoom = 1;
+  const ZOOM_MIN = 0.5, ZOOM_MAX = 2.2;
+  let placingMansion = false;
+
+  const gameScreen = document.getElementById('gameScreen');
+  const canvas = document.getElementById('map');
+  const ctx = canvas.getContext('2d');
+  const mapStatus = document.getElementById('mapStatus');
+  mapStatus.textContent = 'Drag to explore the map. Pick a target or resource tile.';
+
+  function resizeCanvas() {
+    const rect = gameScreen.getBoundingClientRect();
+    canvas.width = Math.max(200, Math.min(WORLD_W, Math.round(rect.width)));
+    canvas.height = Math.max(200, Math.min(WORLD_H, Math.round(rect.height)));
+    clampCamera();
+  }
+
+  camera.x = Math.max(0, BASE.x - window.innerWidth / 2);
+  camera.y = Math.max(0, BASE.y - window.innerHeight / 2);
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+
+  // ---- pre-render a textured ground layer once (speckle + cracks, no external images) ----
+  const groundCanvas = document.createElement('canvas');
+  groundCanvas.width = WORLD_W; groundCanvas.height = WORLD_H;
+  (function buildGround() {
+    const g = groundCanvas.getContext('2d');
+    // base grass
+    g.fillStyle = '#33452c';
+    g.fillRect(0, 0, groundCanvas.width, groundCanvas.height);
+
+    // rough sidewalk/lot blocks scattered around, modern-city feel
+    g.fillStyle = 'rgba(70,68,60,0.35)';
+    for (let i = 0; i < 5; i++) {
+      const bw = 60 + Math.random() * 90, bh = 50 + Math.random() * 70;
+      const bx = Math.random() * (groundCanvas.width - bw), by = Math.random() * (groundCanvas.height - bh);
+      g.fillRect(bx, by, bw, bh);
+    }
+
+    // grass speckle grain (blades of variation)
+    for (let i = 0; i < 2600; i++) {
+      const x = Math.random() * groundCanvas.width, y = Math.random() * groundCanvas.height;
+      const dark = Math.random() > 0.5;
+      g.fillStyle = dark
+        ? `rgba(10,20,8,${(Math.random() * 0.12).toFixed(3)})`
+        : `rgba(140,170,110,${(Math.random() * 0.1).toFixed(3)})`;
+      g.fillRect(x, y, 1.6, 1.6);
+    }
+
+    // the Desert — sandy patch, distinct from the grass, with its own dune-ish grain
+    g.fillStyle = '#8a7148';
+    g.fillRect(DESERT.x1, DESERT.y1, DESERT.x2 - DESERT.x1, DESERT.y2 - DESERT.y1);
+    for (let i = 0; i < 2200; i++) {
+      const x = DESERT.x1 + Math.random() * (DESERT.x2 - DESERT.x1);
+      const y = DESERT.y1 + Math.random() * (DESERT.y2 - DESERT.y1);
+      const light = Math.random() > 0.5;
+      g.fillStyle = light
+        ? `rgba(210,185,130,${(Math.random() * 0.14).toFixed(3)})`
+        : `rgba(90,65,35,${(Math.random() * 0.1).toFixed(3)})`;
+      g.fillRect(x, y, 2, 2);
+    }
+    // soft dune ridges
+    g.strokeStyle = 'rgba(210,185,130,0.15)';
+    g.lineWidth = 3;
+    for (let i = 0; i < 10; i++) {
+      const y = DESERT.y1 + Math.random() * (DESERT.y2 - DESERT.y1);
+      g.beginPath();
+      g.moveTo(DESERT.x1, y);
+      for (let x = DESERT.x1; x <= DESERT.x2; x += 40) {
+        g.lineTo(x, y + Math.sin(x * 0.02) * 12);
+      }
+      g.stroke();
+    }
+    // frayed border where grass gives way to sand
+    g.strokeStyle = 'rgba(51,69,44,0.5)';
+    g.lineWidth = 6;
+    g.strokeRect(DESERT.x1, DESERT.y1, DESERT.x2 - DESERT.x1, DESERT.y2 - DESERT.y1);
+
+    // vignette — scaled to the full (much larger) world so edges don't go black
+    const grad = g.createRadialGradient(
+      groundCanvas.width/2, groundCanvas.height/2, 300,
+      groundCanvas.width/2, groundCanvas.height/2, 1500
+    );
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.35)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, groundCanvas.width, groundCanvas.height);
+  })();
+
+  function baseMaxStamina() { return 100 + (state.mansionLevel - 1) * 15; }
+
+  function shade(hex, percent) {
+    const num = parseInt(hex.slice(1), 16);
+    let r = (num >> 16) + Math.round(2.55 * percent);
+    let g = ((num >> 8) & 0xff) + Math.round(2.55 * percent);
+    let b = (num & 0xff) + Math.round(2.55 * percent);
+    r = Math.max(0, Math.min(255, r));
+    g = Math.max(0, Math.min(255, g));
+    b = Math.max(0, Math.min(255, b));
+    return `rgb(${r},${g},${b})`;
+  }
+  const TROOP_TYPES = [
+    { key: 'enforcer', label: 'Enforcers', row: 'Front line', desc: 'Takes the hits so your damage dealers don\'t have to. Cuts how often a lost raid wounds anyone, and how bad it is when it does.' },
+    { key: 'gunner',   label: 'Gunners',   row: 'Mid line',   desc: 'Your main damage. Most of a hero\'s attack power comes from here.' },
+    { key: 'driver',   label: 'Drivers',   row: 'Back line',  desc: 'Faster boots, sharper reflexes. Boosts movement speed and crit chance.' },
+  ];
+
+  function totalActiveTroops() {
+    return TROOP_TYPES.reduce((sum, t) => sum + state.troopTypes[t.key].active, 0);
+  }
+  function totalWoundedTroops() {
+    return TROOP_TYPES.reduce((sum, t) => sum + state.troopTypes[t.key].wounded, 0);
+  }
+  function formationTotal(formation) {
+    return TROOP_TYPES.reduce((sum, t) => sum + (formation[t.key] || 0), 0);
+  }
+  function heroPower(hero) {
+    const lvlBonus = hero ? (hero.level - 1) * 4 : 0;
+    const tt = state.troopTypes;
+    const troopBonus = tt.gunner.active * 0.5 + tt.enforcer.active * 0.15 + tt.driver.active * 0.15;
+    return 12 + (state.level - 1) * 3 + Math.round(troopBonus) + lvlBonus;
+  }
+  // power for one specific march — only the troops actually sent count
+  function heroPowerWithFormation(hero, formation) {
+    const lvlBonus = hero ? (hero.level - 1) * 4 : 0;
+    const troopBonus = formation.gunner * 0.5 + formation.enforcer * 0.15 + formation.driver * 0.15;
+    return 12 + (state.level - 1) * 3 + Math.round(troopBonus) + lvlBonus;
+  }
+  function deployFormation(formation) {
+    TROOP_TYPES.forEach(t => { state.troopTypes[t.key].active -= (formation[t.key] || 0); });
+  }
+  function returnFormation(formation) {
+    TROOP_TYPES.forEach(t => { state.troopTypes[t.key].active += (formation[t.key] || 0); });
+  }
+  function woundFormationTroops(formation) {
+    // a lost march risks only the troops that actually went — the rest of
+    // the standing army back home is never in danger
+    const totalSent = TROOP_TYPES.reduce((s, t) => s + (formation[t.key] || 0), 0);
+    if (totalSent <= 0) return;
+    if (Math.random() > 0.35) return;
+    let remaining = Math.min(totalSent, 1 + Math.floor(Math.random() * 3));
+    const order = ['enforcer', 'gunner', 'driver'];
+    let wounded = 0;
+    for (const key of order) {
+      if (remaining <= 0) break;
+      const avail = formation[key] || 0;
+      const hit = Math.min(avail, remaining);
+      if (hit <= 0) continue;
+      formation[key] -= hit; // fewer come home; the rest go to the Hospital
+      state.troopTypes[key].wounded += hit;
+      remaining -= hit;
+      wounded += hit;
+    }
+    if (wounded > 0) {
+      addLog(`${wounded} troop${wounded > 1 ? 's' : ''} wounded on the march — sent to the Hospital.`, 'lose');
+    }
+  }
+  function critChance() { return Math.min(0.4, 0.2 + state.troopTypes.driver.active * 0.0015); }
+  function driverSpeedBonus() { return state.troopTypes.driver.active * 0.3; }
+  function troopBatchSize() { return state.barracksLevel * 25; }
+
+  function makeHero(i) {
+    return {
+      id: i, name: HERO_NAMES[i], style: HERO_STYLES[i],
+      x: BASE.x, y: BASE.y,
+      state: 'idle', // idle | walking | attacking | farming
+      walkPhase: 0,
+      stamina: baseMaxStamina(),
+      farmingHub: null,
+      level: 1,
+      flashTarget: null, flashUntil: 0, flashColor: null,
+      formation: null, // troops currently deployed with this hero on a march, if any
+      march: null, // timestamped travel/combat plan — see advanceMarch()
+    };
+  }
+
+  const heroes = [makeHero(0)];
+  let selectedId = 0;
+  function selectedHero() { return heroes.find(h => h.id === selectedId); }
+
+  function hasResources(cost) {
+    return Object.entries(cost).every(([k, v]) => state.resources[k] >= v);
+  }
+  function spendResources(cost) {
+    Object.entries(cost).forEach(([k, v]) => { state.resources[k] -= v; });
+  }
+  function fmtResourceCost(cost) {
+    return Object.entries(cost).map(([k, v]) => `${v} ${k}`).join(', ');
+  }
+
+  function speedPxPerSec() { return 70 + (state.speedLevel - 1) * 45 + driverSpeedBonus(); }
+  function speedUpgradeCost() { return 150 * state.speedLevel; }
+
+  function mansionUpgradeCost() { return 220 * state.mansionLevel; }
+  function mansionResourceCost() {
+    return { lumber: 25 * state.mansionLevel, food: 20 * state.mansionLevel, water: 15 * state.mansionLevel };
+  }
+  function mansionBuildMs() { return 18000 * state.mansionLevel; }
+  function mansionRequirement() {
+    return { barracks: state.mansionLevel, heroLevel: Math.max(0, (state.mansionLevel - 1) * 2) };
+  }
+  function mansionReqMet() {
+    const req = mansionRequirement();
+    return state.barracksLevel >= req.barracks && state.level >= req.heroLevel;
+  }
+
+  function recruitCost() { return 300 * heroes.length; }
+
+  function barracksUpgradeCost() { return 250 * state.barracksLevel; }
+  function barracksResourceCost() {
+    return { lumber: 20 * state.barracksLevel, food: 15 * state.barracksLevel };
+  }
+  function barracksBuildMs() { return 14000 * state.barracksLevel; }
+
+  function heroUpgradeCoinCost(hero) { return 180 * hero.level; }
+  function heroUpgradeResourceCost(hero) {
+    return { food: 18 * hero.level, water: 12 * hero.level };
+  }
+
+  function troopTrainCost(key) { return 300 + Math.round(state.troopTypes[key].active * 2.5); }
+  function troopTrainMs() { return Math.max(9000, 22000 - state.barracksLevel * 1500); }
+
+  function hospitalUpgradeCost() { return 200 * state.hospitalLevel; }
+  function hospitalResourceCost() { return { lumber: 15 * state.hospitalLevel }; }
+  function hospitalBuildMs() { return 12000 * state.hospitalLevel; }
+  function healBatchSize() { return 10 * state.hospitalLevel; }
+  function healCost() { return 40 + totalWoundedTroops() * 2; }
+  function healMs() { return Math.max(6000, 16000 - state.hospitalLevel * 1200); }
+
+  function warehouseUpgradeCost() { return 260 * state.warehouseLevel; }
+
+  function garageOutput() { return 0.4 * state.garageLevel; }
+  function garageUpgradeCost() { return 240 * state.garageLevel; }
+  function garageResourceCost() { return { lumber: 18 * state.garageLevel }; }
+  function garageBuildMs() { return 13000 * state.garageLevel; }
+
+  const RELOCATE_FUEL_COST = 150;
+  const RELOCATE_COOLDOWN_MS = 4 * 60 * 1000;
+  function warehouseResourceCost() { return { lumber: 20 * state.warehouseLevel, food: 20 * state.warehouseLevel }; }
+  function warehouseBuildMs() { return 13000 * state.warehouseLevel; }
+  function resourceCap() { return 500 + (state.warehouseLevel - 1) * 400; }
+
+  function powerRating() {
+    const heroLevelSum = heroes.reduce((sum, h) => sum + h.level, 0);
+    const troopSum = totalActiveTroops();
+    return Math.round(
+      state.level * 20 +
+      state.mansionLevel * 50 +
+      state.barracksLevel * 30 +
+      state.hospitalLevel * 20 +
+      state.warehouseLevel * 20 +
+      state.speedLevel * 15 +
+      heroLevelSum * 25 +
+      troopSum * 1 +
+      (state.governorHeld ? 150 : 0)
+    );
+  }
+
+  function rushCost(remainingMs) { return Math.max(20, Math.ceil((remainingMs / 1000) * 2)); }
+
+  function startTimer(key, durationMs, meta) {
+    timers[key] = { startedAt: performance.now(), endsAt: performance.now() + durationMs, meta: meta || null };
+  }
+  function timerRemaining(key) {
+    const t = timers[key];
+    if (!t) return 0;
+    return Math.max(0, t.endsAt - performance.now());
+  }
+  function timerProgressPct(key) {
+    const t = timers[key];
+    if (!t) return 0;
+    const total = t.endsAt - t.startedAt;
+    const elapsed = performance.now() - t.startedAt;
+    return Math.min(100, Math.max(0, (elapsed / total) * 100));
+  }
+
+  function drawMansion() {
+    const lvl = state.mansionLevel;
+    const x = BASE.x, y = BASE.y;
+
+    const centerW = 40 + lvl * 3, centerH = 26 + lvl * 2;
+    const wingW = 20 + lvl * 1.6, wingH = centerH * 0.62;
+    const roofPeak = 16 + lvl * 2;
+
+    // estate fence line behind everything
+    ctx.strokeStyle = 'rgba(201,162,75,0.35)';
+    ctx.lineWidth = 1;
+    const fenceHalf = centerW / 2 + wingW + 14;
+    ctx.beginPath();
+    ctx.moveTo(x - fenceHalf, y + centerH / 2 + 14);
+    ctx.lineTo(x + fenceHalf, y + centerH / 2 + 14);
+    ctx.stroke();
+    for (let px = -fenceHalf; px <= fenceHalf; px += 10) {
+      ctx.beginPath();
+      ctx.moveTo(x + px, y + centerH / 2 + 10);
+      ctx.lineTo(x + px, y + centerH / 2 + 14);
+      ctx.stroke();
+    }
+
+    // wings (flanking, slightly shorter than center)
+    ctx.fillStyle = '#453a2b';
+    [-1, 1].forEach(side => {
+      const wx = x + side * (centerW / 2 + wingW / 2);
+      ctx.fillRect(wx - wingW / 2, y - wingH / 2 + 4, wingW, wingH);
+      ctx.strokeStyle = 'rgba(201,162,75,0.5)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(wx - wingW / 2, y - wingH / 2 + 4, wingW, wingH);
+      // flat wing roof lip
+      ctx.fillStyle = '#2f261c';
+      ctx.fillRect(wx - wingW / 2 - 2, y - wingH / 2 + 2, wingW + 4, 3);
+      ctx.fillStyle = '#453a2b';
+    });
+
+    // center body
+    ctx.fillStyle = '#4f4230';
+    ctx.fillRect(x - centerW / 2, y - centerH / 2, centerW, centerH);
+    ctx.strokeStyle = 'rgba(201,162,75,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x - centerW / 2, y - centerH / 2, centerW, centerH);
+
+    // peaked roof over center
+    ctx.fillStyle = '#7c2530';
+    ctx.beginPath();
+    ctx.moveTo(x - centerW / 2 - 5, y - centerH / 2);
+    ctx.lineTo(x, y - centerH / 2 - roofPeak);
+    ctx.lineTo(x + centerW / 2 + 5, y - centerH / 2);
+    ctx.closePath();
+    ctx.fill();
+
+    // portico columns + pediment over the entrance
+    const colCount = Math.min(2 + Math.floor(lvl / 2), 5);
+    const colSpan = centerW * 0.6;
+    ctx.strokeStyle = '#e0d9c5';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < colCount; i++) {
+      const cx = x - colSpan / 2 + (colSpan / (colCount - 1 || 1)) * i;
+      ctx.beginPath();
+      ctx.moveTo(cx, y + centerH / 2 - 2);
+      ctx.lineTo(cx, y - centerH / 2 + 6);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#e0d9c5';
+    ctx.beginPath();
+    ctx.moveTo(x - colSpan / 2 - 3, y - centerH / 2 + 6);
+    ctx.lineTo(x, y - centerH / 2 - 6);
+    ctx.lineTo(x + colSpan / 2 + 3, y - centerH / 2 + 6);
+    ctx.closePath();
+    ctx.fill();
+
+    // windows across the whole facade, grid grows with level
+    ctx.fillStyle = '#f0d98c';
+    const rows = lvl >= 4 ? 2 : 1;
+    const cols = Math.min(3 + Math.floor(lvl / 2), 6);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const wx = x - (centerW + wingW * 2) / 2 + 10 + c * ((centerW + wingW * 2 - 20) / (cols - 1 || 1));
+        const wy = y - centerH / 2 + 8 + r * 10;
+        ctx.fillRect(wx - 1.5, wy, 3, 5);
+      }
+    }
+
+    ctx.fillStyle = '#ede6db';
+    ctx.font = '600 11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+
+    if (timers.mansion || timers.barracks) {
+      // scaffolding hatch overlay + countdown while anything in the mansion is building
+      const overlayHalfW = centerW / 2 + wingW + 4;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(201,162,75,0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.rect(x - overlayHalfW, y - centerH / 2 - roofPeak, overlayHalfW * 2, centerH + roofPeak + 10);
+      ctx.clip();
+      for (let d = -overlayHalfW * 2; d < overlayHalfW * 2; d += 6) {
+        ctx.beginPath();
+        ctx.moveTo(x - overlayHalfW + d, y - centerH / 2 - roofPeak);
+        ctx.lineTo(x - overlayHalfW + d + centerH, y + centerH / 2 + 10);
+        ctx.stroke();
+      }
+      ctx.restore();
+      const remain = Math.max(timerRemaining('mansion'), timerRemaining('barracks'));
+      ctx.fillStyle = '#c9a24b';
+      ctx.font = '600 10px Inter, sans-serif';
+      ctx.fillText(`Building… ${fmtSecs(remain)}`, x, y + centerH / 2 + 38);
+    }
+
+    ctx.fillText(`MANSION Lv${lvl} (click)`, x, y + centerH / 2 + 24);
+  }
+
+  function drawHub(h) {
+    const now = performance.now();
+    const depleted = now < h.depletedUntil;
+    if (depleted) {
+      const remain = Math.max(0, h.depletedUntil - now);
+      ctx.fillStyle = 'rgba(74,65,54,0.5)';
+      ctx.beginPath(); ctx.arc(h.x, h.y, 14, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ede6db';
+      ctx.font = '600 11px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(h.name, h.x, h.y - 24);
+      ctx.fillStyle = '#b8afa0';
+      ctx.font = '500 10px Inter, sans-serif';
+      ctx.fillText(`Tapped out — recovers in ${fmtSecs(remain)}`, h.x, h.y + 8);
+      return;
+    }
+
+    ctx.save();
+    ctx.translate(h.x, h.y);
+
+    // ground patch behind the icon
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(0, 4, 20, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (h.id === 'lumber') {
+      // stacked logs
+      for (let row = 0; row < 2; row++) {
+        for (let i = -1; i <= 1; i++) {
+          ctx.fillStyle = row === 0 ? '#5a4028' : '#6b4d30';
+          ctx.beginPath();
+          ctx.ellipse(i * 9, -row * 8, 9, 5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+    } else if (h.id === 'gold') {
+      // coin stack with a vault-ish glint
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = i === 2 ? '#e0bc6f' : '#c9a24b';
+        ctx.beginPath();
+        ctx.ellipse(0, -i * 5, 12, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(21,18,15,0.6)';
+      ctx.font = '700 9px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('$', 0, -10 - 1);
+    } else if (h.id === 'food') {
+      // wheat sheaf
+      ctx.strokeStyle = '#e8d27a';
+      ctx.lineWidth = 2;
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.moveTo(0, 8);
+        ctx.quadraticCurveTo(i * 5, -4, i * 7, -16);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = '#c17d3f';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(0, 10); ctx.lineTo(0, 2); ctx.stroke();
+    } else if (h.id === 'water') {
+      // droplet
+      ctx.fillStyle = '#5b9bb0';
+      ctx.beginPath();
+      ctx.moveTo(0, -14);
+      ctx.quadraticCurveTo(11, 4, 0, 12);
+      ctx.quadraticCurveTo(-11, 4, 0, -14);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(21,18,15,0.4)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.beginPath(); ctx.ellipse(-3, 0, 2.5, 4, -0.3, 0, Math.PI * 2); ctx.fill();
+    }
+
+    ctx.restore();
+
+    ctx.fillStyle = '#ede6db';
+    ctx.font = '600 11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(h.name, h.x, h.y - 24);
+
+    // reserve bar — same idea as a syndicate's health bar
+    const barW = 40, barH = 4;
+    const pct = Math.max(0, h.reserve / h.maxReserve);
+    ctx.fillStyle = 'rgba(21,18,15,0.7)';
+    ctx.fillRect(h.x - barW / 2, h.y - 19, barW, barH);
+    ctx.fillStyle = pct > 0.35 ? '#c9a24b' : '#8c2f39';
+    ctx.fillRect(h.x - barW / 2, h.y - 19, barW * pct, barH);
+
+    const totalTroops = hubTotalTroops(h);
+    const rate = totalTroops > 0 ? hubGatherRate(h, totalTroops) : hubOutput(h);
+    ctx.fillStyle = '#c9a24b';
+    ctx.font = '500 10px Inter, sans-serif';
+    ctx.fillText(`Tier ${h.tier} · +${rate.toFixed(1)}/s${totalTroops > 0 ? ' (farming)' : ''}`, h.x, h.y + 34);
+    ctx.fillStyle = '#8a8073';
+    ctx.font = '500 8px monospace';
+    ctx.fillText(`X ${Math.round(h.x)}, Y ${Math.round(h.y)}`, h.x, h.y + 46);
+  }
+
+  function drawTargetIcon(t, r, color) {
+    ctx.save();
+    ctx.translate(t.x, t.y);
+
+    // badge backdrop
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(21,18,15,0.55)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(237,230,219,0.55)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(0, 0, r - 2, 0, Math.PI * 2); ctx.stroke();
+
+    const s = r * 0.75;
+    ctx.strokeStyle = 'rgba(21,18,15,0.85)';
+    ctx.fillStyle = 'rgba(21,18,15,0.85)';
+    ctx.lineWidth = Math.max(1.5, r * 0.14);
+    ctx.lineCap = 'round';
+
+    if (t.icon === 'claws') {
+      for (let i = -1; i <= 1; i++) {
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.5 + i * s * 0.35, -s * 0.5);
+        ctx.lineTo(-s * 0.1 + i * s * 0.35, s * 0.5);
+        ctx.stroke();
+      }
+    } else if (t.icon === 'fist') {
+      ctx.beginPath();
+      ctx.roundRect(-s * 0.4, -s * 0.15, s * 0.8, s * 0.55, 3);
+      ctx.fill();
+      for (let i = 0; i < 3; i++) {
+        ctx.fillRect(-s * 0.35 + i * (s * 0.28), -s * 0.45, s * 0.2, s * 0.35);
+      }
+    } else if (t.icon === 'anchor') {
+      ctx.beginPath();
+      ctx.arc(0, -s * 0.35, s * 0.18, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 0.18); ctx.lineTo(0, s * 0.5);
+      ctx.moveTo(-s * 0.4, s * 0.1); ctx.lineTo(s * 0.4, s * 0.1);
+      ctx.moveTo(-s * 0.35, s * 0.1); ctx.quadraticCurveTo(-s * 0.35, s * 0.5, 0, s * 0.5);
+      ctx.moveTo(s * 0.35, s * 0.1); ctx.quadraticCurveTo(s * 0.35, s * 0.5, 0, s * 0.5);
+      ctx.stroke();
+    } else if (t.icon === 'skull') {
+      ctx.beginPath();
+      ctx.arc(0, -s * 0.1, s * 0.42, Math.PI, Math.PI * 2);
+      ctx.lineTo(s * 0.42, s * 0.25);
+      ctx.quadraticCurveTo(0, s * 0.5, -s * 0.42, s * 0.25);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(-s * 0.16, -s * 0.1, s * 0.1, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(s * 0.16, -s * 0.1, s * 0.1, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawTarget(t) {
+    const now = performance.now();
+    const dead = now < t.deadUntil;
+    const flashing = heroes.some(hr => hr.flashTarget === t && now < hr.flashUntil);
+    const flashColor = (heroes.find(hr => hr.flashTarget === t && now < hr.flashUntil) || {}).flashColor;
+
+    if (dead) {
+      const remain = Math.max(0, t.deadUntil - now);
+      ctx.fillStyle = 'rgba(74,65,54,0.5)';
+      ctx.beginPath(); ctx.arc(t.x, t.y, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#b8afa0';
+      ctx.font = '500 10px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(Math.ceil(remain / 1000) + 's', t.x, t.y + 4);
+      return;
+    }
+
+    const r = flashing ? 15 : 11;
+    drawTargetIcon(t, r, flashing ? flashColor : t.color);
+
+    ctx.fillStyle = '#ede6db';
+    ctx.font = '600 11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(t.name, t.x, t.y - 24);
+
+    // health bar
+    const barW = 44, barH = 5;
+    const pct = Math.max(0, t.health / t.maxHealth);
+    ctx.fillStyle = 'rgba(21,18,15,0.7)';
+    ctx.fillRect(t.x - barW/2, t.y - 16, barW, barH);
+    ctx.fillStyle = pct > 0.5 ? '#c9a24b' : (pct > 0.2 ? '#b23a46' : '#8c2f39');
+    ctx.fillRect(t.x - barW/2, t.y - 16, barW * pct, barH);
+    ctx.strokeStyle = 'rgba(237,230,219,0.4)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(t.x - barW/2, t.y - 16, barW, barH);
+
+    ctx.fillStyle = '#c9a24b';
+    ctx.font = '500 10px Inter, sans-serif';
+    ctx.fillText(`${Math.max(0, Math.ceil(t.health))}/${t.maxHealth} hp`, t.x, t.y + 28);
+    ctx.fillStyle = '#8a8073';
+    ctx.font = '500 8px monospace';
+    ctx.fillText(`X ${Math.round(t.x)}, Y ${Math.round(t.y)}`, t.x, t.y + 40);
+  }
+
+  function drawHeroSprite(hero) {
+    const x = hero.x, y = hero.y;
+    const walking = hero.state === 'walking';
+    if (walking) hero.walkPhase += 0.25;
+    const legSwing = walking ? Math.sin(hero.walkPhase) * 5 : 0;
+    const style = hero.style;
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    if (hero.id === selectedId) {
+      ctx.strokeStyle = 'rgba(201,162,75,0.7)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(0, -3, 13, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    // legs
+    ctx.strokeStyle = '#2a2521';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(-2, 4); ctx.lineTo(-2 + legSwing, 12); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(2, 4); ctx.lineTo(2 - legSwing, 12); ctx.stroke();
+
+    // torso — outfit color, dimmed slightly while farming
+    ctx.fillStyle = hero.state === 'farming' ? shade(style.outfit, -25) : style.outfit;
+    ctx.fillRect(-4, -6, 8, 10);
+    // trim / collar detail
+    ctx.strokeStyle = style.trim;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-4, -6); ctx.lineTo(4, -6); ctx.stroke();
+
+    // head + a small hat brim so silhouettes read differently even at rest
+    ctx.fillStyle = '#e3c9a8';
+    ctx.beginPath(); ctx.arc(0, -10, 4.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = shade(style.outfit, -15);
+    ctx.beginPath();
+    ctx.ellipse(0, -13.5, 5.5, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // weapon, shown while attacking (swung out) and faintly at rest (holstered)
+    const attacking = hero.state === 'attacking';
+    ctx.save();
+    ctx.translate(5, -8);
+    ctx.rotate(attacking ? -0.5 : 0.9);
+    ctx.globalAlpha = attacking ? 1 : 0.55;
+    if (style.weapon === 'bat') {
+      ctx.strokeStyle = '#8a6a45';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(10, -2); ctx.stroke();
+    } else if (style.weapon === 'knife') {
+      ctx.fillStyle = '#c9c9c9';
+      ctx.beginPath();
+      ctx.moveTo(0, 0); ctx.lineTo(9, -1.5); ctx.lineTo(0, -3); ctx.closePath();
+      ctx.fill();
+    } else if (style.weapon === 'pistol') {
+      ctx.fillStyle = '#3a3a3a';
+      ctx.fillRect(0, -2, 7, 2.5);
+      ctx.fillRect(0, -1, 2, 4);
+    }
+    ctx.restore();
+
+    if (attacking) {
+      ctx.strokeStyle = style.trim;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(6, -10); ctx.lineTo(15, -3); ctx.stroke();
+    }
+
+    ctx.restore();
+
+    ctx.fillStyle = '#b8afa0';
+    ctx.font = '500 9px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(hero.name, x, y + 22);
+  }
+
+  function drawRoad(x1, y1, x2, y2) {
+    // asphalt bed
+    ctx.save();
+    ctx.strokeStyle = 'rgba(45,45,48,0.85)';
+    ctx.lineWidth = 10;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    // curb edge
+    ctx.strokeStyle = 'rgba(20,20,22,0.6)';
+    ctx.lineWidth = 12;
+    ctx.globalCompositeOperation = 'destination-over';
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+    // dashed lane line
+    ctx.strokeStyle = 'rgba(230,210,120,0.55)';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([6, 7]);
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawHeroTrail(hero) {
+    // a thin breadcrumb line from home to wherever a hero currently is —
+    // only while they're actually out, so it doesn't clutter the whole map
+    if (hero.state === 'idle') return;
+    ctx.save();
+    ctx.strokeStyle = hero.style.trim;
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 5]);
+    ctx.beginPath();
+    ctx.moveTo(BASE.x, BASE.y);
+    ctx.lineTo(hero.x, hero.y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawGovernorOffice() {
+    const x = GOVERNOR.x, y = GOVERNOR.y;
+    const now = performance.now();
+    const flashing = now < GOVERNOR.flashUntil;
+
+    // stone civic building: dome + columns
+    ctx.fillStyle = flashing ? GOVERNOR.flashColor : '#5a5348';
+    ctx.fillRect(x - 24, y - 10, 48, 20);
+    ctx.strokeStyle = 'rgba(201,162,75,0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x - 24, y - 10, 48, 20);
+    // dome
+    ctx.fillStyle = '#e0d9c5';
+    ctx.beginPath();
+    ctx.arc(x, y - 12, 11, Math.PI, 0);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y - 12, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    // columns
+    ctx.strokeStyle = '#e0d9c5';
+    ctx.lineWidth = 2;
+    for (let i = -2; i <= 2; i++) {
+      ctx.beginPath();
+      ctx.moveTo(x + i * 8, y + 8);
+      ctx.lineTo(x + i * 8, y - 2);
+      ctx.stroke();
+    }
+    // flag: gold if yours, gray if not
+    ctx.strokeStyle = '#8a7148';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x, y - 22); ctx.lineTo(x, y - 34); ctx.stroke();
+    ctx.fillStyle = state.governorHeld ? '#c9a24b' : '#6b6558';
+    ctx.beginPath();
+    ctx.moveTo(x, y - 34); ctx.lineTo(x + 13, y - 30); ctx.lineTo(x, y - 26);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#ede6db';
+    ctx.font = '600 11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(GOVERNOR.name, x, y - 40);
+
+    const cycleRemain = Math.max(0, state.governorCycleEndsAt - now);
+    ctx.fillStyle = '#c9a24b';
+    ctx.font = '500 10px Inter, sans-serif';
+    if (!GOVERNOR.scouted) {
+      ctx.fillStyle = '#8c2f39';
+      ctx.font = '600 10px Inter, sans-serif';
+      ctx.fillText('? unscouted — tap to scout', x, y + 24);
+    } else if (state.governorHeld) {
+      ctx.fillText(`Yours · resets in ${fmtSecs(cycleRemain)}`, x, y + 24);
+    } else {
+      const hero = selectedHero();
+      const odds = hero ? Math.round(raidWinChance(hero, GOVERNOR) * 100) : null;
+      ctx.fillText(`Power ${GOVERNOR.power}${odds != null ? ' · ' + odds + '% odds at full strength' : ''} · tap to seize`, x, y + 24);
+    }
+    ctx.fillStyle = '#b8afa0';
+    ctx.font = '500 9px Inter, sans-serif';
+    ctx.fillText(`City resets every 3 days · next in ${fmtSecs(cycleRemain)}`, x, y + 36);
+  }
+
+  function drawRivalBase(rb) {
+    const now = performance.now();
+    const dead = now < rb.defeatedUntil;
+    const x = rb.x, y = rb.y;
+
+    if (dead) {
+      const remain = Math.max(0, rb.defeatedUntil - now);
+      ctx.fillStyle = 'rgba(60,30,35,0.5)';
+      ctx.fillRect(x - 12, y - 10, 24, 18);
+      ctx.fillStyle = '#b8afa0';
+      ctx.font = '500 10px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(Math.ceil(remain / 1000) + 's', x, y + 4);
+      return;
+    }
+
+    const flashing = now < rb.flashUntil;
+
+    // small hostile manor: dark body, spiked purple-red roof
+    ctx.fillStyle = flashing ? rb.flashColor : '#3a2430';
+    ctx.fillRect(x - 13, y - 8, 26, 16);
+    ctx.strokeStyle = 'rgba(178,58,70,0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x - 13, y - 8, 26, 16);
+    ctx.fillStyle = '#6b1f2e';
+    ctx.beginPath();
+    ctx.moveTo(x - 16, y - 8);
+    ctx.lineTo(x, y - 20);
+    ctx.lineTo(x + 16, y - 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#e0bc6f';
+    ctx.fillRect(x - 2, y - 3, 4, 6);
+
+    ctx.fillStyle = '#ede6db';
+    ctx.font = '600 11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(rb.name, x, y - 26);
+
+    if (rb.scouted) {
+      const hero = selectedHero();
+      const odds = hero ? Math.round(raidWinChance(hero, rb) * 100) : null;
+      ctx.fillStyle = '#c9a24b';
+      ctx.font = '500 10px Inter, sans-serif';
+      ctx.fillText(`Power ${rb.power}${odds != null ? ' · ' + odds + '% odds at full strength' : ''}`, x, y + 26);
+      ctx.fillStyle = '#b8afa0';
+      ctx.font = '500 9px Inter, sans-serif';
+      ctx.fillText('tap to raid', x, y + 38);
+    } else {
+      ctx.fillStyle = '#8c2f39';
+      ctx.font = '600 10px Inter, sans-serif';
+      ctx.fillText('? unscouted — tap to scout', x, y + 26);
+    }
+    ctx.fillStyle = '#8a8073';
+    ctx.font = '500 8px monospace';
+    ctx.fillText(`X ${Math.round(x)}, Y ${Math.round(y)}`, x, y + 50);
+  }
+
+  function drawMap() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const viewW = canvas.width / zoom, viewH = canvas.height / zoom;
+    ctx.drawImage(
+      groundCanvas,
+      camera.x, camera.y, viewW, viewH,
+      0, 0, canvas.width, canvas.height
+    );
+
+    ctx.save();
+    ctx.scale(zoom, zoom);
+    ctx.translate(-camera.x, -camera.y);
+
+    // (tracer lines to each target removed by request)
+    heroes.forEach(drawHeroTrail);
+
+    drawMansion();
+    hubs.forEach(drawHub);
+    targets.forEach(drawTarget);
+    rivalBases.forEach(drawRivalBase);
+    drawGovernorOffice();
+    heroes.forEach(drawHeroSprite);
+
+    ctx.restore();
+  }
+
+  function animate() {
+    const now = performance.now();
+    let anyChanged = false;
+    heroes.forEach(hero => { if (advanceMarch(hero, now)) anyChanged = true; });
+    drawMap();
+    const coordsEl = document.getElementById('coordsBadge');
+    if (coordsEl) {
+      const cx = Math.round(camera.x + (canvas.width / zoom) / 2);
+      const cy = Math.round(camera.y + (canvas.height / zoom) / 2);
+      coordsEl.textContent = `X ${cx}, Y ${cy}`;
+    }
+    if (anyChanged) render();
+    requestAnimationFrame(animate);
+  }
+  animate();
+
+  // ---- resumable march engine ----
+  // A hero's activity (walking out, fighting/farming, walking home) is stored
+  // as absolute timestamps rather than a chain of setTimeout/requestAnimationFrame
+  // callbacks. That means closing the tab/phone mid-march and reopening it
+  // later just "catches up" — advanceMarch() re-derives where the hero should
+  // be and what should have already happened from real elapsed time, instead
+  // of losing the march entirely. Same shape the game already uses for
+  // build/train timers (start + end timestamp, saved as "time remaining").
+  const COMBAT_DELAY_MS = { attack: 500, raid: 550, seize: 650 };
+  const RETURN_PAUSE_MS = 400;
+
+  function marchTravelMs(fromX, fromY, toX, toY) {
+    const dist = Math.hypot(toX - fromX, toY - fromY);
+    const terrainMultiplier = inDesert(toX, toY) ? 0.5 : 1; // sand slows the trip in
+    return Math.max(50, (dist / (speedPxPerSec() * terrainMultiplier)) * 1000);
+  }
+
+  function findMarchRef(m) {
+    if (m.kind === 'attack') return targets.find(t => t.name === m.refName);
+    if (m.kind === 'raid') return rivalBases.find(r => r.name === m.refName);
+    if (m.kind === 'seize') return GOVERNOR;
+    return null;
+  }
+
+  function dispatchMarch(hero, kind, refName, formation, toX, toY, staminaCost) {
+    const now = performance.now();
+    hero.stamina -= staminaCost;
+    deployFormation(formation);
+    hero.formation = formation;
+    hero.state = 'walking';
+    const travelMs = marchTravelMs(hero.x, hero.y, toX, toY);
+    hero.march = {
+      kind, refName, formation,
+      fromX: hero.x, fromY: hero.y, toX, toY,
+      departAt: now, arriveAt: now + travelMs, arrived: false,
+      resolveAt: now + travelMs + (COMBAT_DELAY_MS[kind] || 0), resolved: false,
+      returnDepartAt: null, returnArriveAt: null, returnToX: null, returnToY: null,
+    };
+    advanceSelection(hero.id);
+    render();
+  }
+
+  function resolveCombatMarch(hero, m, now) {
+    const ref = findMarchRef(m);
+    m.resolved = true;
+
+    if (m.kind === 'attack') {
+      const t = ref;
+      const variance = 0.8 + Math.random() * 0.4;
+      const isCrit = Math.random() < critChance();
+      const dmg = Math.round(heroPowerWithFormation(hero, m.formation) * variance * (isCrit ? 2 : 1));
+      t.health = Math.max(0, t.health - dmg);
+      const killed = t.health <= 0;
+
+      hero.flashTarget = t;
+      hero.flashColor = isCrit ? '#ffffff' : (killed ? '#c9a24b' : '#e0bc6f');
+      hero.flashUntil = performance.now() + (isCrit ? 550 : 400);
+
+      const chipCoins = Math.round(dmg * t.coinPerHp);
+      state.coins += chipCoins;
+      gainXp(Math.round(dmg * 0.28));
+      const critTag = isCrit ? 'CRITICAL! ' : '';
+
+      if (killed) {
+        const bonusCoins = Math.round(t.maxHealth * t.coinPerHp * 0.3);
+        state.coins += bonusCoins;
+        gainXp(t.xpKill);
+        t.health = t.maxHealth;
+        t.deadUntil = performance.now() + t.respawnMs;
+        relocateTarget(t);
+        state.eventPoints += 1;
+        const kq = quests.find(q => q.id === 'kills3');
+        if (kq && !kq.claimed) kq.progress = Math.min(kq.target, kq.progress + 1);
+        const loot = rollLoot(t);
+        const lootTag = loot ? ` Picked up: ${loot}.` : '';
+        addLog(`${critTag}${hero.name} took down ${t.name} — ${chipCoins + bonusCoins} coins, +${t.xpKill} xp.${lootTag} Regrouping ${Math.round(t.respawnMs/1000)}s.`, isCrit ? 'crit' : 'win');
+      } else {
+        addLog(`${critTag}${hero.name} hit ${t.name} for ${dmg} dmg (+${chipCoins} coins). ${Math.max(0,Math.ceil(t.health))}/${t.maxHealth} hp left.`, isCrit ? 'crit' : 'chip');
+      }
+    } else if (m.kind === 'raid') {
+      const rb = ref;
+      const winChance = raidWinChanceWithFormation(hero, rb, m.formation);
+      const won = Math.random() < winChance;
+      rb.flashColor = won ? '#c9a24b' : '#8c2f39';
+      rb.flashUntil = performance.now() + 500;
+
+      if (won) {
+        const cash = Math.floor(rb.cashMin + Math.random() * (rb.cashMax - rb.cashMin));
+        state.coins += cash;
+        if (rb.resType !== 'gold') state.resources[rb.resType] += rb.resAmt;
+        gainXp(Math.round(rb.power * 1.2));
+        state.eventPoints += 2;
+        rb.defeatedUntil = performance.now() + rb.respawnMs;
+        relocateRivalBase(rb);
+        rb.scouted = false;
+        const resTag = rb.resType !== 'gold' ? ` + ${rb.resAmt} ${rb.resType}` : '';
+        addLog(`${hero.name} raided ${rb.name} — won ${cash} coins${resTag}. They've scattered — regrouping ${Math.round(rb.respawnMs/1000)}s somewhere new.`, 'win');
+      } else {
+        addLog(`${hero.name} got run off ${rb.name}. No loot this time.`, 'lose');
+        woundFormationTroops(m.formation);
+      }
+    } else if (m.kind === 'seize') {
+      const winChance = raidWinChanceWithFormation(hero, GOVERNOR, m.formation);
+      const won = Math.random() < winChance;
+      GOVERNOR.flashColor = won ? '#c9a24b' : '#8c2f39';
+      GOVERNOR.flashUntil = performance.now() + 600;
+
+      if (won) {
+        state.governorHeld = true;
+        gainXp(Math.round(GOVERNOR.power * 2));
+        state.eventPoints += 5;
+        addLog(`${hero.name} seized the Governor's Office. The city is yours until the next reset.`, 'win');
+      } else {
+        addLog(`${hero.name} couldn't take the Governor's Office. Try again once you're stronger.`, 'lose');
+        woundFormationTroops(m.formation);
+      }
+    }
+
+    // return leg is planned now, using wherever home is at this exact moment —
+    // matches how the old code recomputed the trip home only once the fight ended
+    m.returnToX = BASE.x; m.returnToY = BASE.y;
+    const travelBackMs = marchTravelMs(m.toX, m.toY, BASE.x, BASE.y);
+    m.returnDepartAt = now + RETURN_PAUSE_MS;
+    m.returnArriveAt = m.returnDepartAt + travelBackMs;
+    mapStatus.textContent = `${hero.name} heading home...`;
+  }
+
+  // advances one hero's march by however much real time has passed since the
+  // last check — a single call can walk through several phases at once if a
+  // lot of time went by (e.g. the app was closed through an entire fight and
+  // the trip home). Returns true if something changed that the HUD/log should
+  // reflect, so callers only re-render when it's actually worth it.
+  function advanceMarch(hero, now) {
+    const m = hero.march;
+    if (!m) return false;
+    let changed = false;
+
+    if (!m.arrived) {
+      if (now >= m.arriveAt) {
+        m.arrived = true;
+        hero.x = m.toX; hero.y = m.toY;
+        if (m.kind === 'farm') {
+          hero.state = 'farming';
+          hero.farmingHub = m.refName;
+          const hub = hubById(m.refName);
+          if (hub) {
+            addLog(`${hero.name} is now farming ${hub.name}.`, 'hub');
+            if (hub.tier >= 2) {
+              const q = quests.find(q => q.id === 'findTier2');
+              if (q && !q.claimed) q.progress = Math.min(q.target, q.progress + 1);
+            }
+          }
+          mapStatus.textContent = 'Pick a target or hub for the selected hero.';
+          hero.march = null;
+          return true;
+        }
+        if (m.kind === 'return') {
+          hero.state = 'idle';
+          if (hero.formation) { returnFormation(hero.formation); hero.formation = null; }
+          hero.march = null;
+          mapStatus.textContent = 'Pick a target or hub for the selected hero.';
+          return true;
+        }
+        hero.state = 'attacking';
+        const ref = findMarchRef(m);
+        const label = m.kind === 'attack' ? `striking ${ref ? ref.name : ''}`
+          : m.kind === 'raid' ? `raiding ${ref ? ref.name : ''}`
+          : `fighting for control of the city`;
+        mapStatus.textContent = `${hero.name} ${label}...`;
+        changed = true;
+      } else {
+        const t = Math.max(0, Math.min(1, (now - m.departAt) / (m.arriveAt - m.departAt)));
+        hero.x = m.fromX + (m.toX - m.fromX) * t;
+        hero.y = m.fromY + (m.toY - m.fromY) * t;
+        hero.state = 'walking';
+        return false;
+      }
+    }
+
+    // combat kinds only from here — farm/return already returned above
+    if (!m.resolved) {
+      if (now >= m.resolveAt) {
+        resolveCombatMarch(hero, m, now);
+        changed = true;
+      } else {
+        return changed; // still standing at the fight, waiting on the resolve delay
+      }
+    }
+
+    if (now < m.returnDepartAt) return changed; // brief pause after the fight
+
+    if (now < m.returnArriveAt) {
+      const t = Math.max(0, Math.min(1, (now - m.returnDepartAt) / (m.returnArriveAt - m.returnDepartAt)));
+      hero.x = m.toX + (m.returnToX - m.toX) * t;
+      hero.y = m.toY + (m.returnToY - m.toY) * t;
+      hero.state = 'walking';
+      return changed;
+    }
+
+    hero.x = m.returnToX; hero.y = m.returnToY;
+    hero.state = 'idle';
+    returnFormation(m.formation);
+    hero.formation = null;
+    mapStatus.textContent = 'Pick a target or hub for the selected hero.';
+    hero.march = null;
+    return true;
+  }
+
+  const mansionModal = document.getElementById('mansionModal');
+  function openMansion() { mansionModal.classList.add('open'); renderMansionRooms(); window.scrollTo(0, 0); }
+  function closeMansion() { mansionModal.classList.remove('open'); }
+  document.getElementById('closeModal').addEventListener('click', closeMansion);
+
+  function switchRoom(room) {
+    document.querySelectorAll('.door').forEach(t => t.classList.toggle('active', t.dataset.room === room));
+    ['foyer','barracks','armory','events','inventory','heroes','hospital','warehouse','garage'].forEach(r => {
+      document.getElementById('room-' + r).style.display = (r === room) ? 'block' : 'none';
+    });
+  }
+
+  document.querySelectorAll('.door').forEach(door => {
+    door.addEventListener('click', () => switchRoom(door.dataset.room));
+  });
+
+  document.getElementById('eventsIconBtn').addEventListener('click', () => {
+    openMansion();
+    switchRoom('events');
+  });
+  document.getElementById('enterMansionBtn').addEventListener('click', () => {
+    openMansion();
+  });
+  document.getElementById('zoomInBtn').addEventListener('click', () => applyZoom(zoom * 1.25));
+  document.getElementById('zoomOutBtn').addEventListener('click', () => applyZoom(zoom * 0.8));
+  document.getElementById('heroesIconBtn').addEventListener('click', () => {
+    openMansion();
+    switchRoom('heroes');
+  });
+  document.getElementById('inventoryIconBtn').addEventListener('click', () => {
+    openMansion();
+    switchRoom('inventory');
+  });
+  document.getElementById('storeIconBtn').addEventListener('click', () => {
+    openMansion();
+    switchRoom('armory');
+  });
+
+  function advanceSelection(dispatchedId) {
+    const n = heroes.length;
+    const startIdx = heroes.findIndex(h => h.id === dispatchedId);
+    for (let offset = 1; offset <= n; offset++) {
+      const candidate = heroes[(startIdx + offset) % n];
+      if (candidate && candidate.id !== dispatchedId && candidate.state === 'idle') {
+        selectedId = candidate.id;
+        return;
+      }
+    }
+  }
+
+  function sendHeroToAttack(hero, t, formation) {
+    dispatchMarch(hero, 'attack', t.name, formation, t.x, t.y, t.cost);
+    mapStatus.textContent = `${hero.name} heading to ${t.name}...`;
+  }
+
+  function raidWinChance(hero, rb) {
+    const power = heroPower(hero);
+    return Math.max(0.1, Math.min(0.9, 0.5 + (power - rb.power) / (rb.power * 1.6)));
+  }
+  function raidWinChanceWithFormation(hero, rb, formation) {
+    const power = heroPowerWithFormation(hero, formation);
+    return Math.max(0.1, Math.min(0.9, 0.5 + (power - rb.power) / (rb.power * 1.6)));
+  }
+
+  function sendHeroToRaid(hero, rb, formation) {
+    dispatchMarch(hero, 'raid', rb.name, formation, rb.x, rb.y, rb.cost);
+    mapStatus.textContent = `${hero.name} heading to raid ${rb.name}...`;
+  }
+
+  function sendHeroToSeizeGovernor(hero, formation) {
+    dispatchMarch(hero, 'seize', null, formation, GOVERNOR.x, GOVERNOR.y, 50);
+    mapStatus.textContent = `${hero.name} heading to seize the Governor's Office...`;
+  }
+
+  function sendHeroToFarm(hero, hub, formation) {
+    if (formationTotal(formation) < 1) return; // formation modal already blocks this, just in case
+    dispatchMarch(hero, 'farm', hub.id, formation, hub.x, hub.y, 0);
+    mapStatus.textContent = `${hero.name} heading to ${hub.name}...`;
+  }
+
+  function recallHero(hero) {
+    hero.farmingHub = null;
+    const now = performance.now();
+    const travelMs = marchTravelMs(hero.x, hero.y, BASE.x, BASE.y);
+    hero.state = 'walking';
+    hero.march = {
+      kind: 'return', refName: null, formation: null,
+      fromX: hero.x, fromY: hero.y, toX: BASE.x, toY: BASE.y,
+      departAt: now, arriveAt: now + travelMs, arrived: false,
+      resolveAt: null, resolved: true,
+      returnDepartAt: null, returnArriveAt: null, returnToX: null, returnToY: null,
+    };
+    mapStatus.textContent = `${hero.name} heading home...`;
+    render();
+  }
+
+  function isValidMansionSpot(x, y) {
+    const margin = 120;
+    if (x < margin || x > WORLD_W - margin || y < margin || y > WORLD_H - margin) return false;
+    const minDist = 90;
+    const obstacles = [...hubs, ...targets, ...rivalBases, GOVERNOR];
+    return obstacles.every(o => Math.hypot(o.x - x, o.y - y) >= minDist);
+  }
+
+  function handleMapTap(wx, wy) {
+    if (placingMansion) {
+      if (!isValidMansionSpot(wx, wy)) {
+        mapStatus.textContent = 'Too close to something else, or too near the edge — try another spot.';
+        return;
+      }
+      const ok = confirm(`Relocate your mansion to X ${Math.round(wx)}, Y ${Math.round(wy)} for ${RELOCATE_FUEL_COST} fuel?`);
+      if (!ok) { mapStatus.textContent = 'Pick another spot, or open the Garage to cancel.'; return; }
+      BASE.x = wx; BASE.y = wy;
+      heroes.forEach(h => { if (h.state === 'idle') { h.x = BASE.x; h.y = BASE.y; } });
+      state.resources.fuel -= RELOCATE_FUEL_COST;
+      state.relocateReadyAt = performance.now() + RELOCATE_COOLDOWN_MS;
+      placingMansion = false;
+      addLog(`Relocated the mansion to X ${Math.round(BASE.x)}, Y ${Math.round(BASE.y)}.`, 'win');
+      mapStatus.textContent = 'Mansion relocated.';
+      render();
+      return;
+    }
+
+    const clickedHero = heroes.find(h => Math.hypot(h.x - wx, h.y - wy) < 14);
+    if (clickedHero) {
+      if (clickedHero.state === 'farming') { recallHero(clickedHero); }
+      selectedId = clickedHero.id;
+      render();
+      return;
+    }
+
+    const lvl = state.mansionLevel;
+    const mansionHalfW = (40 + lvl * 3) / 2 + (20 + lvl * 1.6) + 6;
+    const mansionHalfH = (26 + lvl * 2) / 2 + (16 + lvl * 2) + 6;
+    if (Math.abs(BASE.x - wx) < mansionHalfW && Math.abs(BASE.y - wy) < mansionHalfH) {
+      openMansion();
+      return;
+    }
+
+    if (Math.abs(GOVERNOR.x - wx) < 20 && Math.abs(GOVERNOR.y - wy) < 20) {
+      if (!GOVERNOR.scouted) {
+        GOVERNOR.scouted = true;
+        addLog(`Scouted the Governor's Office — power ${GOVERNOR.power}.`, 'hub');
+        render();
+        return;
+      }
+      if (state.governorHeld) { mapStatus.textContent = 'You already hold the city — it resets in time.'; return; }
+      const hero = selectedHero();
+      if (!hero || hero.state !== 'idle') { mapStatus.textContent = 'Select an idle hero to seize the office.'; return; }
+      if (hero.stamina < 50) { mapStatus.textContent = `${hero.name} doesn't have enough stamina.`; return; }
+      openFormationModal(hero, `Seize the Governor's Office`, (formation) => sendHeroToSeizeGovernor(hero, formation), { oddsTarget: GOVERNOR });
+      return;
+    }
+
+    const rb = rivalBases.find(r => Math.abs(r.x - wx) < 16 && Math.abs(r.y - wy) < 16);
+    if (rb) {
+      if (performance.now() < rb.defeatedUntil) { mapStatus.textContent = `${rb.name} is laying low. Wait it out.`; return; }
+      if (!rb.scouted) {
+        rb.scouted = true;
+        addLog(`Scouted ${rb.name} — power ${rb.power}.`, 'hub');
+        render();
+        return;
+      }
+      const hero = selectedHero();
+      if (!hero || hero.state !== 'idle') { mapStatus.textContent = 'Select an idle hero to raid.'; return; }
+      if (hero.stamina < rb.cost) { mapStatus.textContent = `${hero.name} doesn't have enough stamina.`; return; }
+      openFormationModal(hero, `Raid ${rb.name}`, (formation) => sendHeroToRaid(hero, rb, formation), { oddsTarget: rb });
+      return;
+    }
+
+    const hero = selectedHero();
+    if (!hero || hero.state !== 'idle') {
+      const idleHero = heroes.find(h => h.state === 'idle');
+      mapStatus.textContent = idleHero
+        ? `${idleHero.name} is free — tap their portrait to select them.`
+        : 'All your heroes are already out.';
+      return;
+    }
+
+    const hub = hubs.find(h => Math.abs(h.x - wx) < 14 && Math.abs(h.y - wy) < 14);
+    if (hub) {
+      if (performance.now() < hub.depletedUntil) { mapStatus.textContent = `${hub.name} is tapped out. Give it time to recover.`; return; }
+      if (totalActiveTroops() < 1) {
+        mapStatus.textContent = 'Need at least one trained troop to farm. Visit the Barracks.';
+        return;
+      }
+      openFormationModal(hero, `Send Troops to Farm ${hub.name}`, (formation) => sendHeroToFarm(hero, hub, formation), { farmHub: hub, minTroops: 1 });
+      return;
+    }
+
+    const t = targets.find(t => Math.hypot(t.x - wx, t.y - wy) < 16);
+    if (!t) return;
+    if (performance.now() < t.deadUntil) { mapStatus.textContent = `${t.name} is regrouping. Wait it out.`; return; }
+    if (hero.stamina < t.cost) { mapStatus.textContent = `${hero.name} doesn't have enough stamina.`; return; }
+
+    openFormationModal(hero, `Attack ${t.name}`, (formation) => sendHeroToAttack(hero, t, formation));
+  }
+
+  // ---- formation selection modal ----
+  let formationCurrentHero = null;
+  let formationOnConfirm = null;
+  // for raids/the Governor's Office: the win/lose target this march is against,
+  // so the preview can show real odds for the formation actually being built
+  // instead of the map's full-army estimate. null for plain attacks (chip
+  // damage only — there's no win/lose roll to preview).
+  let formationOddsTarget = null;
+  // set when the modal is opened for farming instead of a fight — swaps the
+  // preview to a gather-rate estimate and requires at least 1 troop to send
+  let formationFarmHub = null;
+  let formationMinTroops = 0;
+  const formationValues = { enforcer: 0, gunner: 0, driver: 0 };
+
+  function openFormationModal(hero, title, onConfirm, opts) {
+    opts = opts || {};
+    formationCurrentHero = hero;
+    formationOnConfirm = onConfirm;
+    formationOddsTarget = opts.oddsTarget || null;
+    formationFarmHub = opts.farmHub || null;
+    formationMinTroops = opts.minTroops || 0;
+    document.getElementById('formationTitle').textContent = title;
+    document.getElementById('formationSub').textContent = formationFarmHub
+      ? 'Troops stay deployed with your hero while they farm — more troops sent means faster gathering.'
+      : 'Send troops with your hero. Only what you send is at risk.';
+
+    TROOP_TYPES.forEach(t => {
+      const avail = state.troopTypes[t.key].active;
+      formationValues[t.key] = 0;
+      document.getElementById('avail' + t.key[0].toUpperCase() + t.key.slice(1)).textContent = `${avail} available`;
+      document.getElementById('form' + t.key[0].toUpperCase() + t.key.slice(1)).value = 0;
+    });
+
+    updateFormationPreview();
+    document.getElementById('formationModal').classList.add('open');
+  }
+
+  function closeFormationModal() {
+    document.getElementById('formationModal').classList.remove('open');
+    formationCurrentHero = null;
+    formationOnConfirm = null;
+    formationOddsTarget = null;
+    formationFarmHub = null;
+    formationMinTroops = 0;
+  }
+
+  function updateFormationPreview() {
+    const totalSent = formationTotal(formationValues);
+    const sendBtn = document.getElementById('formationSendBtn');
+    if (formationFarmHub) {
+      const rate = hubGatherRate(formationFarmHub, hubTotalTroops(formationFarmHub) + totalSent);
+      document.getElementById('formationPreview').textContent = totalSent > 0
+        ? `Gather rate: ${rate.toFixed(1)}/s`
+        : 'Send at least 1 troop to farm this tile.';
+      sendBtn.disabled = totalSent < formationMinTroops;
+      return;
+    }
+    sendBtn.disabled = false;
+    const power = formationCurrentHero ? heroPowerWithFormation(formationCurrentHero, formationValues) : 12;
+    let text = `Attack power for this march: ${power}`;
+    if (formationOddsTarget && formationCurrentHero) {
+      const odds = Math.round(raidWinChanceWithFormation(formationCurrentHero, formationOddsTarget, formationValues) * 100);
+      text += ` · ${odds}% odds with this formation`;
+    }
+    document.getElementById('formationPreview').textContent = text;
+  }
+
+  function setFormationValue(key, value) {
+    const avail = state.troopTypes[key].active;
+    formationValues[key] = Math.max(0, Math.min(avail, value));
+    document.getElementById('form' + key[0].toUpperCase() + key.slice(1)).value = formationValues[key];
+    updateFormationPreview();
+  }
+
+  document.querySelectorAll('.stepper-btn[data-step]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.key;
+      setFormationValue(key, formationValues[key] + parseInt(btn.dataset.step, 10));
+    });
+  });
+  document.querySelectorAll('.max-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.key;
+      setFormationValue(key, state.troopTypes[key].active);
+    });
+  });
+
+  document.getElementById('formationCancelBtn').addEventListener('click', closeFormationModal);
+  document.getElementById('formationSendBtn').addEventListener('click', () => {
+    if (formationTotal(formationValues) < formationMinTroops) return;
+    const callback = formationOnConfirm;
+    const formation = { ...formationValues };
+    closeFormationModal();
+    if (callback) callback(formation);
+  });
+
+  function clampCamera() {
+    const viewW = canvas.width / zoom, viewH = canvas.height / zoom;
+    camera.x = Math.max(0, Math.min(Math.max(0, WORLD_W - viewW), camera.x));
+    camera.y = Math.max(0, Math.min(Math.max(0, WORLD_H - viewH), camera.y));
+  }
+
+  const drag = { active: false, moved: false, lastX: 0, lastY: 0 };
+  const DRAG_THRESHOLD = 12;
+
+  function dragStart(clientX, clientY) {
+    drag.active = true; drag.moved = false;
+    drag.lastX = clientX; drag.lastY = clientY;
+    canvas.style.cursor = 'grabbing';
+  }
+  function dragMove(clientX, clientY) {
+    if (!drag.active) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+    const dx = (clientX - drag.lastX) * scaleX, dy = (clientY - drag.lastY) * scaleY;
+    if (Math.hypot(clientX - drag.lastX, clientY - drag.lastY) > DRAG_THRESHOLD) drag.moved = true;
+    if (drag.moved) {
+      camera.x -= dx / zoom; camera.y -= dy / zoom;
+      clampCamera();
+      drag.lastX = clientX; drag.lastY = clientY;
+    }
+  }
+  function dragEnd(clientX, clientY) {
+    if (!drag.active) return;
+    canvas.style.cursor = 'grab';
+    if (!drag.moved) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+      const cx = (clientX - rect.left) * scaleX, cy = (clientY - rect.top) * scaleY;
+      handleMapTap(camera.x + cx / zoom, camera.y + cy / zoom);
+    }
+    drag.active = false;
+  }
+
+  function applyZoom(newZoom) {
+    zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom));
+    clampCamera();
+    render();
+  }
+
+  canvas.style.cursor = 'grab';
+  canvas.addEventListener('mousedown', (e) => dragStart(e.clientX, e.clientY));
+  window.addEventListener('mousemove', (e) => dragMove(e.clientX, e.clientY));
+  window.addEventListener('mouseup', (e) => dragEnd(e.clientX, e.clientY));
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    applyZoom(zoom * (e.deltaY < 0 ? 1.12 : 0.89));
+  }, { passive: false });
+
+  let pinchStartDist = null;
+  let pinchStartZoom = 1;
+  function touchDist(t1, t2) {
+    return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+  }
+
+  canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      drag.active = false;
+      pinchStartDist = touchDist(e.touches[0], e.touches[1]);
+      pinchStartZoom = zoom;
+    } else if (e.touches.length === 1) {
+      pinchStartDist = null;
+      const t = e.touches[0]; dragStart(t.clientX, t.clientY);
+    }
+  }, { passive: true });
+
+  canvas.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2 && pinchStartDist) {
+      e.preventDefault();
+      const dist = touchDist(e.touches[0], e.touches[1]);
+      applyZoom(pinchStartZoom * (dist / pinchStartDist));
+      return;
+    }
+    if (e.touches.length === 1) {
+      const t = e.touches[0]; dragMove(t.clientX, t.clientY);
+      if (drag.moved) e.preventDefault();
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    if (e.touches.length < 2) pinchStartDist = null;
+    if (drag.active && e.touches.length === 0 && e.changedTouches.length) {
+      const t = e.changedTouches[0]; dragEnd(t.clientX, t.clientY);
+    }
+  });
+
+  function gainXp(amount) {
+    state.xp += amount;
+    while (state.xp >= state.xpToLevel) {
+      state.xp -= state.xpToLevel;
+      state.level += 1;
+      state.xpToLevel = Math.round(state.xpToLevel * 1.15);
+      addLog(`Account leveled up to ${state.level}.`, 'win');
+    }
+  }
+
+  function addLog(text, cls) {
+    const logEl = document.getElementById('log');
+    if (logEl.querySelector('.log-empty')) logEl.innerHTML = '';
+    const entry = document.createElement('div');
+    entry.className = 'log-entry ' + cls;
+    entry.textContent = text;
+    logEl.insertBefore(entry, logEl.firstChild);
+    while (logEl.children.length > 40) logEl.removeChild(logEl.lastChild);
+  }
+
+  function renderHeroPortraits() {
+    const row = document.getElementById('heroPortraits');
+    row.innerHTML = '';
+    heroes.forEach(hero => {
+      const portrait = document.createElement('div');
+      portrait.className = 'hero-portrait' + (hero.id === selectedId ? ' selected' : '');
+      portrait.style.color = hero.style.trim;
+      portrait.style.borderColor = hero.id === selectedId ? '' : hero.style.outfit;
+      portrait.title = `${hero.name} — ${hero.state} — Lv${hero.level} · pwr ${heroPower(hero)}`;
+      portrait.textContent = hero.name[0];
+      const ring = document.createElement('div');
+      ring.className = 'stamina-ring';
+      const fill = document.createElement('div');
+      fill.className = 'stamina-ring-fill';
+      fill.style.width = (hero.stamina / baseMaxStamina() * 100) + '%';
+      ring.appendChild(fill);
+      portrait.appendChild(ring);
+
+      const stateLabel = document.createElement('div');
+      stateLabel.textContent = hero.state;
+      stateLabel.style.cssText = 'position:absolute; top:-14px; left:0; right:0; text-align:center; font-size:8px; color:var(--paper-dim);';
+      portrait.style.position = 'relative';
+      portrait.appendChild(stateLabel);
+
+      portrait.addEventListener('click', () => {
+        if (hero.id === selectedId && hero.state !== 'idle') {
+          // tapping an already-selected, stuck-busy hero force-recalls them —
+          // an escape hatch in case a mission never resolved back to idle
+          hero.state = 'idle';
+          hero.farmingHub = null;
+          hero.x = BASE.x; hero.y = BASE.y;
+          hero.march = null;
+          if (hero.formation) { returnFormation(hero.formation); hero.formation = null; }
+          addLog(`Manually recalled ${hero.name}.`, 'hub');
+        } else {
+          selectedId = hero.id;
+        }
+        render();
+      });
+      row.appendChild(portrait);
+    });
+    if (heroes.length < MAX_HEROES) {
+      const slot = document.createElement('div');
+      slot.className = 'hero-portrait empty-slot';
+      slot.textContent = '+';
+      slot.title = `Recruit in the mansion — ${recruitCost()} coins`;
+      slot.addEventListener('click', () => { openMansion(); switchRoom('foyer'); });
+      row.appendChild(slot);
+    }
+  }
+
+  function fmtSecs(ms) { return Math.ceil(ms / 1000) + 's'; }
+  function fmtDuration(ms) {
+    if (ms >= 60000) return Math.ceil(ms / 60000) + 'm';
+    return fmtSecs(ms);
+  }
+
+  function renderDeployOverlay() {
+    const el = document.getElementById('deployOverlay');
+    if (!el) return;
+    const now = performance.now();
+    const rows = [];
+    heroes.forEach(hero => {
+      if (hero.state === 'farming' && hero.farmingHub) {
+        const hub = hubById(hero.farmingHub);
+        if (!hub) return;
+        const totalTroops = hubTotalTroops(hub);
+        const rate = hubGatherRate(hub, totalTroops);
+        const etaMs = rate > 0 ? (hub.reserve / rate) * 1000 : Infinity;
+        rows.push(`${hero.name} — farming ${hub.name} — tile empties in ~${fmtDuration(etaMs)}`);
+        return;
+      }
+      const m = hero.march;
+      if (!m) return;
+      const label = m.kind === 'attack' ? `attacking ${m.refName}`
+        : m.kind === 'raid' ? `raiding ${m.refName}`
+        : m.kind === 'seize' ? `seizing the Governor's Office`
+        : m.kind === 'farm' ? `heading out to farm`
+        : `heading home`;
+      const backAt = m.kind === 'return' ? m.arriveAt
+        : m.kind === 'farm' ? m.arriveAt
+        : (m.returnArriveAt || m.resolveAt || m.arriveAt);
+      const verb = m.kind === 'farm' ? 'arriving in' : 'back in';
+      const remain = Math.max(0, backAt - now);
+      rows.push(`${hero.name} — ${label} — ${verb} ${fmtDuration(remain)}`);
+    });
+    if (!rows.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = 'flex';
+    el.innerHTML = rows.map(r => `<div class="deploy-row">${r}</div>`).join('');
+  }
+
+  function renderTimerRow(rowId, fillId, labelId, key) {
+    const row = document.getElementById(rowId);
+    if (timers[key]) {
+      row.style.display = 'flex';
+      document.getElementById(fillId).style.width = timerProgressPct(key) + '%';
+      document.getElementById(labelId).textContent = fmtSecs(timerRemaining(key));
+    } else {
+      row.style.display = 'none';
+    }
+  }
+
+  function renderMansionRooms() {
+    document.getElementById('powerMeta').textContent =
+      `${powerRating()} — every upgrade in the house feeds this number.`;
+
+    const req = mansionRequirement();
+    const met = mansionReqMet();
+    const barracksOk = state.barracksLevel >= req.barracks;
+    const heroOk = state.level >= req.heroLevel;
+    const mansionRes = mansionResourceCost();
+    const mansionResOk = hasResources(mansionRes);
+    document.getElementById('mansionMeta').innerHTML =
+      `Level ${state.mansionLevel} — +${(state.mansionLevel - 1) * 15} max stamina.<br>` +
+      `<span class="item-req ${barracksOk ? 'met' : ''}">${barracksOk ? '✓' : '✗'} Barracks level ${req.barracks} (you have ${state.barracksLevel})</span><br>` +
+      (req.heroLevel > 0
+        ? `<span class="item-req ${heroOk ? 'met' : ''}">${heroOk ? '✓' : '✗'} Account level ${req.heroLevel} (you have ${state.level})</span><br>`
+        : `<span class="item-req met">✓ No hero-level requirement yet</span><br>`) +
+      `<span class="item-req ${mansionResOk ? 'met' : ''}">${mansionResOk ? '✓' : '✗'} ${fmtResourceCost(mansionRes)}</span>`;
+    renderTimerRow('mansionTimerRow', 'mansionTimerFill', 'mansionTimerLabel', 'mansion');
+    const mansionBtn = document.getElementById('mansionBtn');
+    if (timers.mansion) {
+      const cost = rushCost(timerRemaining('mansion'));
+      mansionBtn.textContent = `Rush — ${cost} coins`;
+      mansionBtn.disabled = state.coins < cost;
+    } else {
+      mansionBtn.textContent = `Upgrade — ${mansionUpgradeCost()} coins, ${fmtSecs(mansionBuildMs())}`;
+      mansionBtn.disabled = !met || state.coins < mansionUpgradeCost() || !mansionResOk;
+    }
+
+    document.getElementById('recruitMeta').textContent = `Have ${heroes.length} of ${MAX_HEROES}.`;
+    const recruitBtn = document.getElementById('recruitBtn');
+    if (heroes.length >= MAX_HEROES) { recruitBtn.textContent = 'All recruited'; recruitBtn.disabled = true; }
+    else { recruitBtn.textContent = `Recruit — ${recruitCost()} coins`; recruitBtn.disabled = state.coins < recruitCost(); }
+
+    const barracksRes = barracksResourceCost();
+    const barracksResOk = hasResources(barracksRes);
+    document.getElementById('barracksMeta').innerHTML =
+      `Level ${state.barracksLevel} — trains ${troopBatchSize()} troops per batch.<br>` +
+      `<span class="item-req ${barracksResOk ? 'met' : ''}">${barracksResOk ? '✓' : '✗'} ${fmtResourceCost(barracksRes)}</span>`;
+    renderTimerRow('barracksTimerRow', 'barracksTimerFill', 'barracksTimerLabel', 'barracks');
+    const barracksBtn = document.getElementById('barracksBtn');
+    if (timers.barracks) {
+      const cost = rushCost(timerRemaining('barracks'));
+      barracksBtn.textContent = `Rush — ${cost} coins`;
+      barracksBtn.disabled = state.coins < cost;
+    } else {
+      barracksBtn.textContent = `Upgrade — ${barracksUpgradeCost()} coins, ${fmtSecs(barracksBuildMs())}`;
+      barracksBtn.disabled = state.coins < barracksUpgradeCost() || !barracksResOk;
+    }
+
+    renderBarracksTroopCards();
+
+    document.getElementById('speedMeta').textContent = `Current speed: level ${state.speedLevel}.`;
+    const speedBtn = document.getElementById('speedBtn');
+    speedBtn.textContent = `Upgrade — ${speedUpgradeCost()} coins`;
+    speedBtn.disabled = state.coins < speedUpgradeCost();
+
+    const potionBtn = document.getElementById('potionBtn');
+    potionBtn.disabled = state.coins < 100;
+
+    renderEventsRoom();
+    renderInventoryRoom();
+    renderHeroesRoom();
+    renderHospitalRoom();
+    renderWarehouseRoom();
+    renderGarageRoom();
+  }
+
+  function renderBarracksTroopCards() {
+    const list = document.getElementById('troopTrainList');
+    list.innerHTML = '';
+    TROOP_TYPES.forEach(t => {
+      const pool = state.troopTypes[t.key];
+      const timerKey = 'train_' + t.key;
+      const card = document.createElement('div');
+      card.className = 'item-card';
+
+      const info = document.createElement('div');
+      info.className = 'item-info';
+      info.innerHTML = `
+        <div class="item-name">${t.label} <span style="color:var(--paper-dim);font-weight:400;font-size:11px;">— ${t.row}</span></div>
+        <div class="item-meta">${pool.active} active${pool.wounded ? `, ${pool.wounded} wounded` : ''}. ${t.desc}</div>
+      `;
+      const timerRow = document.createElement('div');
+      timerRow.className = 'timer-row';
+      timerRow.style.display = timers[timerKey] ? 'flex' : 'none';
+      const track = document.createElement('div');
+      track.className = 'timer-track';
+      const fill = document.createElement('div');
+      fill.className = 'bar-fill';
+      fill.style.background = 'linear-gradient(90deg,#8fa3bd,#6b7a8f)';
+      if (timers[timerKey]) fill.style.width = timerProgressPct(timerKey) + '%';
+      track.appendChild(fill);
+      const label = document.createElement('span');
+      label.className = 'timer-label';
+      if (timers[timerKey]) label.textContent = fmtSecs(timerRemaining(timerKey));
+      timerRow.appendChild(track);
+      timerRow.appendChild(label);
+      info.appendChild(timerRow);
+      card.appendChild(info);
+
+      const btn = document.createElement('button');
+      btn.className = 'gold-btn';
+      if (timers[timerKey]) {
+        const cost = rushCost(timerRemaining(timerKey));
+        btn.textContent = `Rush — ${cost} coins`;
+        btn.disabled = state.coins < cost;
+        btn.addEventListener('click', () => {
+          if (state.coins < cost) return;
+          state.coins -= cost;
+          timers[timerKey].endsAt = performance.now();
+          addLog(`Rushed ${t.label} training.`, 'win');
+          render();
+        });
+      } else {
+        const cost = troopTrainCost(t.key);
+        btn.textContent = `Train — ${cost} coins, ${fmtSecs(troopTrainMs())}`;
+        btn.disabled = state.coins < cost;
+        btn.addEventListener('click', () => {
+          if (state.coins < cost) return;
+          state.coins -= cost;
+          startTimer(timerKey, troopTrainMs(), { batch: troopBatchSize(), key: t.key });
+          addLog(`Training a batch of ${troopBatchSize()} ${t.label} — ${fmtSecs(troopTrainMs())}.`, 'hub');
+          render();
+        });
+      }
+      card.appendChild(btn);
+      list.appendChild(card);
+    });
+  }
+
+  function renderHospitalRoom() {
+    document.getElementById('hospitalMeta').textContent =
+      `Level ${state.hospitalLevel} — heals ${healBatchSize()} wounded troops per batch.`;
+    renderTimerRow('hospitalTimerRow', 'hospitalTimerFill', 'hospitalTimerLabel', 'hospital');
+    const hospitalBtn = document.getElementById('hospitalBtn');
+    const hospitalRes = hospitalResourceCost();
+    const hospitalResOk = hasResources(hospitalRes);
+    if (timers.hospital) {
+      const cost = rushCost(timerRemaining('hospital'));
+      hospitalBtn.textContent = `Rush — ${cost} coins`;
+      hospitalBtn.disabled = state.coins < cost;
+    } else {
+      hospitalBtn.textContent = `Upgrade — ${hospitalUpgradeCost()} coins + ${fmtResourceCost(hospitalRes)}`;
+      hospitalBtn.disabled = state.coins < hospitalUpgradeCost() || !hospitalResOk;
+    }
+
+    document.getElementById('healMeta').textContent = `${totalWoundedTroops()} wounded troops waiting.`;
+    renderTimerRow('healTimerRow', 'healTimerFill', 'healTimerLabel', 'heal');
+    const healBtn = document.getElementById('healBtn');
+    if (timers.heal) {
+      const cost = rushCost(timerRemaining('heal'));
+      healBtn.textContent = `Rush — ${cost} coins`;
+      healBtn.disabled = state.coins < cost;
+    } else if (totalWoundedTroops() <= 0) {
+      healBtn.textContent = 'No one waiting';
+      healBtn.disabled = true;
+    } else {
+      healBtn.textContent = `Treat — ${healCost()} coins, ${fmtSecs(healMs())}`;
+      healBtn.disabled = state.coins < healCost();
+    }
+  }
+
+  function renderWarehouseRoom() {
+    document.getElementById('warehouseMeta').textContent =
+      `Level ${state.warehouseLevel} — holds up to ${resourceCap()} of each resource.`;
+    renderTimerRow('warehouseTimerRow', 'warehouseTimerFill', 'warehouseTimerLabel', 'warehouse');
+    const warehouseBtn = document.getElementById('warehouseBtn');
+    const whRes = warehouseResourceCost();
+    const whResOk = hasResources(whRes);
+    if (timers.warehouse) {
+      const cost = rushCost(timerRemaining('warehouse'));
+      warehouseBtn.textContent = `Rush — ${cost} coins`;
+      warehouseBtn.disabled = state.coins < cost;
+    } else {
+      warehouseBtn.textContent = `Upgrade — ${warehouseUpgradeCost()} coins + ${fmtResourceCost(whRes)}, ${fmtSecs(warehouseBuildMs())}`;
+      warehouseBtn.disabled = state.coins < warehouseUpgradeCost() || !whResOk;
+    }
+  }
+
+  function renderGarageRoom() {
+    document.getElementById('garageMeta').textContent =
+      `Level ${state.garageLevel} — produces ${garageOutput().toFixed(1)} fuel/s.`;
+    renderTimerRow('garageTimerRow', 'garageTimerFill', 'garageTimerLabel', 'garage');
+    const garageBtn = document.getElementById('garageBtn');
+    const gRes = garageResourceCost();
+    const gResOk = hasResources(gRes);
+    if (timers.garage) {
+      const cost = rushCost(timerRemaining('garage'));
+      garageBtn.textContent = `Rush — ${cost} coins`;
+      garageBtn.disabled = state.coins < cost;
+    } else {
+      garageBtn.textContent = `Upgrade — ${garageUpgradeCost()} coins + ${fmtResourceCost(gRes)}, ${fmtSecs(garageBuildMs())}`;
+      garageBtn.disabled = state.coins < garageUpgradeCost() || !gResOk;
+    }
+
+    document.getElementById('mansionCoordsMeta').textContent = `X ${Math.round(BASE.x)}, Y ${Math.round(BASE.y)}`;
+
+    const relocateBtn = document.getElementById('relocateBtn');
+    const relocateMeta = document.getElementById('relocateMeta');
+    const cooldownRemain = Math.max(0, state.relocateReadyAt - performance.now());
+    if (placingMansion) {
+      relocateMeta.textContent = 'Tap anywhere on the map to drop the mansion there.';
+      relocateBtn.textContent = 'Cancel';
+      relocateBtn.disabled = false;
+    } else if (cooldownRemain > 0) {
+      relocateMeta.textContent = `Costs ${RELOCATE_FUEL_COST} fuel. Ready again in ${fmtSecs(cooldownRemain)}.`;
+      relocateBtn.textContent = 'On Cooldown';
+      relocateBtn.disabled = true;
+    } else {
+      relocateMeta.textContent = `Costs ${RELOCATE_FUEL_COST} fuel. Pick a new spot on the map.`;
+      relocateBtn.textContent = 'Relocate';
+      relocateBtn.disabled = state.resources.fuel < RELOCATE_FUEL_COST;
+    }
+  }
+
+  function renderHeroesRoom() {
+    const list = document.getElementById('heroUpgradeList');
+    list.innerHTML = '';
+    heroes.forEach(hero => {
+      const coinCost = heroUpgradeCoinCost(hero);
+      const resCost = heroUpgradeResourceCost(hero);
+      const affordable = state.coins >= coinCost && hasResources(resCost);
+
+      const card = document.createElement('div');
+      card.className = 'item-card';
+      card.innerHTML = `
+        <div class="item-info">
+          <div class="item-name" style="color:${hero.style.trim}">${hero.name} — Level ${hero.level}</div>
+          <div class="item-meta">Attack power ${heroPower(hero)}. Next level: ${coinCost} coins + ${fmtResourceCost(resCost)}.</div>
+        </div>
+      `;
+      const btn = document.createElement('button');
+      btn.className = 'gold-btn';
+      btn.textContent = 'Level Up';
+      btn.disabled = !affordable;
+      btn.addEventListener('click', () => {
+        if (state.coins < heroUpgradeCoinCost(hero) || !hasResources(heroUpgradeResourceCost(hero))) return;
+        state.coins -= heroUpgradeCoinCost(hero);
+        spendResources(heroUpgradeResourceCost(hero));
+        hero.level += 1;
+        addLog(`${hero.name} leveled up to ${hero.level}. Attack power now ${heroPower(hero)}.`, 'win');
+        render();
+      });
+      card.appendChild(btn);
+      list.appendChild(card);
+    });
+  }
+
+  function renderInventoryRoom() {
+    document.getElementById('invResourceMeta').textContent =
+      `Lumber ${state.resources.lumber.toFixed(0)} · Food ${state.resources.food.toFixed(0)} · Water ${state.resources.water.toFixed(0)}`;
+
+    const lootList = document.getElementById('lootList');
+    const items = Object.keys(inventory).filter(name => inventory[name] > 0);
+    if (!items.length) {
+      lootList.innerHTML = '<div class="quest-progress">Nothing picked up yet — buy potions in the Armory, or find loot from syndicate kills.</div>';
+    } else {
+      lootList.innerHTML = '';
+      items.forEach(name => {
+        const row = document.createElement('div');
+        row.className = 'quest-row';
+        const info = document.createElement('div');
+        info.className = 'quest-info';
+        info.innerHTML = `<div class="quest-desc">${name}</div><div class="quest-progress">×${inventory[name]}</div>`;
+        row.appendChild(info);
+
+        if (name === 'Stamina Potion') {
+          const hero = selectedHero();
+          const btn = document.createElement('button');
+          btn.className = 'gold-btn';
+          btn.textContent = 'Use';
+          btn.disabled = !hero || hero.stamina >= baseMaxStamina();
+          btn.addEventListener('click', () => {
+            const h = selectedHero();
+            if (!h || inventory['Stamina Potion'] <= 0) return;
+            inventory['Stamina Potion'] -= 1;
+            h.stamina = Math.min(baseMaxStamina(), h.stamina + 20);
+            addLog(`Used a Stamina Potion on ${h.name}.`, 'win');
+            render();
+          });
+          row.appendChild(btn);
+        }
+        lootList.appendChild(row);
+      });
+    }
+  }
+
+  function renderEventsRoom() {
+    const dailyReady = performance.now() >= state.dailyReadyAt;
+    const dailyBtn = document.getElementById('dailyBtn');
+    const dailyMeta = document.getElementById('dailyMeta');
+    if (dailyReady) {
+      dailyMeta.textContent = 'Ready to claim — 80 coins.';
+      dailyBtn.textContent = 'Claim';
+      dailyBtn.disabled = false;
+    } else {
+      const remain = state.dailyReadyAt - performance.now();
+      dailyMeta.textContent = `Come back in ${fmtSecs(remain)}.`;
+      dailyBtn.textContent = 'Claimed';
+      dailyBtn.disabled = true;
+    }
+
+    const eventRemain = Math.max(0, state.eventEndsAt - performance.now());
+    document.getElementById('eventMeta').textContent =
+      eventRemain > 0
+        ? `${state.eventPoints} points earned · resets in ${fmtSecs(eventRemain)}.`
+        : `${state.eventPoints} points earned · cycle ended, ready to reset.`;
+
+    const track = document.getElementById('eventTrack');
+    track.innerHTML = '';
+    EVENT_MILESTONES.forEach((m, i) => {
+      const reached = state.eventPoints >= m.points;
+      const div = document.createElement('div');
+      div.className = 'event-milestone' + (reached ? ' reached' : '');
+      const claimedKey = 'claimed' + i;
+      const claimed = m[claimedKey];
+      div.innerHTML = `<span class="pts">${m.points} pts</span>+${m.reward}c`;
+      if (reached && !claimed) {
+        const btn = document.createElement('button');
+        btn.textContent = 'Claim';
+        btn.className = 'gold-btn';
+        btn.style.marginTop = '6px';
+        btn.style.width = '100%';
+        btn.addEventListener('click', () => {
+          state.coins += m.reward;
+          m[claimedKey] = true;
+          addLog(`Weekly push milestone hit — +${m.reward} coins.`, 'win');
+          render();
+        });
+        div.appendChild(btn);
+      } else if (claimed) {
+        div.innerHTML += '<div style="margin-top:6px;color:var(--paper-dim);">Claimed</div>';
+      }
+      track.appendChild(div);
+    });
+
+    const questList = document.getElementById('questList');
+    questList.innerHTML = '';
+    quests.forEach(q => {
+      const row = document.createElement('div');
+      row.className = 'quest-row';
+      const done = q.progress >= q.target;
+      row.innerHTML = `
+        <div class="quest-info">
+          <div class="quest-desc">${q.desc}</div>
+          <div class="quest-progress">${Math.min(q.progress, q.target)} / ${q.target}${q.claimed ? ' · claimed' : ''}</div>
+        </div>
+      `;
+      const btn = document.createElement('button');
+      btn.className = 'gold-btn';
+      if (q.claimed) { btn.textContent = 'Done'; btn.disabled = true; }
+      else if (done) {
+        btn.textContent = `Claim +${q.reward}`;
+        btn.addEventListener('click', () => {
+          state.coins += q.reward;
+          q.claimed = true;
+          addLog(`Contract complete: ${q.desc} — +${q.reward} coins.`, 'win');
+          render();
+        });
+      } else { btn.textContent = `+${q.reward}`; btn.disabled = true; }
+      row.appendChild(btn);
+      questList.appendChild(row);
+    });
+  }
+
+  function render() {
+    document.getElementById('levelLabel').textContent = `Lv ${state.level}`;
+    document.getElementById('powerLabel').textContent = `⚡ ${powerRating()}`;
+    document.getElementById('coinTotal').textContent = state.coins.toFixed(0);
+    const cap = resourceCap();
+    document.getElementById('resLumber').textContent = `${state.resources.lumber.toFixed(0)}/${cap}`;
+    document.getElementById('resFood').textContent = `${state.resources.food.toFixed(0)}/${cap}`;
+    document.getElementById('resWater').textContent = `${state.resources.water.toFixed(0)}/${cap}`;
+    document.getElementById('resFuel').textContent = `${state.resources.fuel.toFixed(0)}/${cap}`;
+    renderHeroPortraits();
+    renderDeployOverlay();
+    if (mansionModal.classList.contains('open')) renderMansionRooms();
+  }
+
+  document.getElementById('recruitBtn').addEventListener('click', () => {
+    if (heroes.length >= MAX_HEROES) return;
+    const cost = recruitCost();
+    if (state.coins < cost) return;
+    state.coins -= cost;
+    const newHero = makeHero(heroes.length);
+    heroes.push(newHero);
+    addLog(`Recruited ${newHero.name}.`, 'win');
+    render();
+  });
+
+  document.getElementById('mansionBtn').addEventListener('click', () => {
+    if (timers.mansion) {
+      const cost = rushCost(timerRemaining('mansion'));
+      if (state.coins < cost) return;
+      state.coins -= cost;
+      timers.mansion.endsAt = performance.now();
+      addLog('Rushed the mansion expansion.', 'win');
+      render();
+      return;
+    }
+    if (!mansionReqMet()) return;
+    const cost = mansionUpgradeCost();
+    const resCost = mansionResourceCost();
+    if (state.coins < cost || !hasResources(resCost)) return;
+    state.coins -= cost;
+    spendResources(resCost);
+    startTimer('mansion', mansionBuildMs());
+    addLog(`Mansion expansion underway — ${fmtSecs(mansionBuildMs())}.`, 'hub');
+    render();
+  });
+
+  document.getElementById('barracksBtn').addEventListener('click', () => {
+    if (timers.barracks) {
+      const cost = rushCost(timerRemaining('barracks'));
+      if (state.coins < cost) return;
+      state.coins -= cost;
+      timers.barracks.endsAt = performance.now();
+      addLog('Rushed the barracks upgrade.', 'win');
+      render();
+      return;
+    }
+    const cost = barracksUpgradeCost();
+    const resCost = barracksResourceCost();
+    if (state.coins < cost || !hasResources(resCost)) return;
+    state.coins -= cost;
+    spendResources(resCost);
+    startTimer('barracks', barracksBuildMs());
+    addLog(`Barracks upgrade underway — ${fmtSecs(barracksBuildMs())}.`, 'hub');
+    render();
+  });
+
+  document.getElementById('hospitalBtn').addEventListener('click', () => {
+    if (timers.hospital) {
+      const cost = rushCost(timerRemaining('hospital'));
+      if (state.coins < cost) return;
+      state.coins -= cost;
+      timers.hospital.endsAt = performance.now();
+      addLog('Rushed the hospital expansion.', 'win');
+      render();
+      return;
+    }
+    const cost = hospitalUpgradeCost();
+    const resCost = hospitalResourceCost();
+    if (state.coins < cost || !hasResources(resCost)) return;
+    state.coins -= cost;
+    spendResources(resCost);
+    startTimer('hospital', hospitalBuildMs());
+    addLog(`Hospital expansion underway — ${fmtSecs(hospitalBuildMs())}.`, 'hub');
+    render();
+  });
+
+  document.getElementById('healBtn').addEventListener('click', () => {
+    if (timers.heal) {
+      const cost = rushCost(timerRemaining('heal'));
+      if (state.coins < cost) return;
+      state.coins -= cost;
+      timers.heal.endsAt = performance.now();
+      addLog('Rushed treatment at the Hospital.', 'win');
+      render();
+      return;
+    }
+    if (totalWoundedTroops() <= 0) return;
+    const cost = healCost();
+    if (state.coins < cost) return;
+    state.coins -= cost;
+    const batch = Math.min(totalWoundedTroops(), healBatchSize());
+    startTimer('heal', healMs(), { batch });
+    addLog(`Treating ${batch} wounded troops — ${fmtSecs(healMs())}.`, 'hub');
+    render();
+  });
+
+  document.getElementById('warehouseBtn').addEventListener('click', () => {
+    if (timers.warehouse) {
+      const cost = rushCost(timerRemaining('warehouse'));
+      if (state.coins < cost) return;
+      state.coins -= cost;
+      timers.warehouse.endsAt = performance.now();
+      addLog('Rushed the warehouse expansion.', 'win');
+      render();
+      return;
+    }
+    const cost = warehouseUpgradeCost();
+    const resCost = warehouseResourceCost();
+    if (state.coins < cost || !hasResources(resCost)) return;
+    state.coins -= cost;
+    spendResources(resCost);
+    startTimer('warehouse', warehouseBuildMs());
+    addLog(`Warehouse expansion underway — ${fmtSecs(warehouseBuildMs())}.`, 'hub');
+    render();
+  });
+
+  document.getElementById('garageBtn').addEventListener('click', () => {
+    if (timers.garage) {
+      const cost = rushCost(timerRemaining('garage'));
+      if (state.coins < cost) return;
+      state.coins -= cost;
+      timers.garage.endsAt = performance.now();
+      addLog('Rushed the garage expansion.', 'win');
+      render();
+      return;
+    }
+    const cost = garageUpgradeCost();
+    const resCost = garageResourceCost();
+    if (state.coins < cost || !hasResources(resCost)) return;
+    state.coins -= cost;
+    spendResources(resCost);
+    startTimer('garage', garageBuildMs());
+    addLog(`Garage expansion underway — ${fmtSecs(garageBuildMs())}.`, 'hub');
+    render();
+  });
+
+  document.getElementById('relocateBtn').addEventListener('click', () => {
+    if (placingMansion) {
+      placingMansion = false;
+      mapStatus.textContent = 'Relocation cancelled.';
+      render();
+      return;
+    }
+    const cooldownRemain = Math.max(0, state.relocateReadyAt - performance.now());
+    if (cooldownRemain > 0 || state.resources.fuel < RELOCATE_FUEL_COST) return;
+    placingMansion = true;
+    closeMansion();
+    mapStatus.textContent = 'Tap anywhere on the map to drop the mansion there.';
+    render();
+  });
+
+  document.getElementById('speedBtn').addEventListener('click', () => {
+    const cost = speedUpgradeCost();
+    if (state.coins < cost) return;
+    state.coins -= cost;
+    state.speedLevel += 1;
+    addLog(`Bought running shoes — speed level ${state.speedLevel}.`, 'win');
+    render();
+  });
+
+  document.getElementById('potionBtn').addEventListener('click', () => {
+    if (state.coins < 100) return;
+    state.coins -= 100;
+    inventory['Stamina Potion'] = (inventory['Stamina Potion'] || 0) + 1;
+    addLog('Bought a Stamina Potion — check your Inventory to use it.', 'win');
+    render();
+  });
+
+  document.getElementById('dailyBtn').addEventListener('click', () => {
+    if (performance.now() < state.dailyReadyAt) return;
+    state.coins += 80;
+    state.dailyReadyAt = performance.now() + DAILY_COOLDOWN_MS;
+    addLog('Claimed the daily check-in — +80 coins.', 'win');
+    render();
+  });
+
+  setInterval(() => {
+    const max = baseMaxStamina();
+    let changed = false;
+    heroes.forEach(h => { if (h.stamina < max) { h.stamina += 1; changed = true; } });
+    if (changed) render();
+  }, 3000);
+
+  setInterval(() => {
+    let changed = false;
+    const cap = resourceCap();
+    const now = performance.now();
+    hubs.forEach(h => {
+      if (now < h.depletedUntil) return; // still tapped out, recovering
+      const totalTroops = hubTotalTroops(h);
+      if (totalTroops <= 0) return; // nobody actively farming — tile sits idle, doesn't drain on its own
+      const amount = Math.min(hubGatherRate(h, totalTroops), h.reserve);
+      if (amount <= 0) return;
+      const key = hubResourceKey(h);
+      if (key === 'gold') state.coins += amount;
+      else state.resources[key] = Math.min(cap, state.resources[key] + amount);
+      h.reserve -= amount;
+      changed = true;
+      if (h.reserve <= 0) {
+        h.reserve = h.maxReserve;
+        h.depletedUntil = now + hubRegenMs(h);
+        heroes.filter(hh => hh.farmingHub === h.id).forEach(hh => {
+          addLog(`${hh.name}'s crew tapped out ${h.name} — recalled home.`, 'lose');
+          recallHero(hh);
+        });
+      }
+    });
+    if (state.governorHeld) {
+      state.coins += 4; // running the city pays out while you hold it
+      changed = true;
+    }
+    if (garageOutput() > 0) {
+      state.resources.fuel = Math.min(cap, state.resources.fuel + garageOutput());
+      changed = true;
+    }
+    if (changed) render();
+  }, 1000);
+
+  // resolves finished build/train timers and refreshes any open countdowns
+  setInterval(() => {
+    let changed = false;
+
+    if (timers.mansion && timerRemaining('mansion') <= 0) {
+      state.mansionLevel += 1;
+      timers.mansion = null;
+      addLog(`The mansion now stands at level ${state.mansionLevel}.`, 'win');
+      changed = true;
+    }
+    if (timers.barracks && timerRemaining('barracks') <= 0) {
+      state.barracksLevel += 1;
+      timers.barracks = null;
+      addLog(`Barracks upgraded to level ${state.barracksLevel}.`, 'win');
+      changed = true;
+    }
+    TROOP_TYPES.forEach(t => {
+      const key = 'train_' + t.key;
+      if (timers[key] && timerRemaining(key) <= 0) {
+        const gained = timers[key].meta.batch;
+        state.troopTypes[t.key].active += gained;
+        timers[key] = null;
+        const q = quests.find(q => q.id === 'trainBatch');
+        if (q && !q.claimed) q.progress = Math.min(q.target, q.progress + 1);
+        addLog(`Training complete — +${gained} ${t.label}.`, 'win');
+        changed = true;
+      }
+    });
+    if (timers.hospital && timerRemaining('hospital') <= 0) {
+      state.hospitalLevel += 1;
+      timers.hospital = null;
+      addLog(`Hospital upgraded to level ${state.hospitalLevel}.`, 'win');
+      changed = true;
+    }
+    if (timers.heal && timerRemaining('heal') <= 0) {
+      let toHeal = timers.heal.meta.batch;
+      const order = ['enforcer', 'gunner', 'driver'];
+      for (const key of order) {
+        if (toHeal <= 0) break;
+        const pool = state.troopTypes[key];
+        const amt = Math.min(pool.wounded, toHeal);
+        pool.wounded -= amt;
+        pool.active += amt;
+        toHeal -= amt;
+      }
+      const healed = timers.heal.meta.batch - toHeal;
+      timers.heal = null;
+      addLog(`${healed} troops treated and back on duty.`, 'win');
+      changed = true;
+    }
+    if (timers.warehouse && timerRemaining('warehouse') <= 0) {
+      state.warehouseLevel += 1;
+      timers.warehouse = null;
+      addLog(`Warehouse upgraded to level ${state.warehouseLevel}. Holds ${resourceCap()} of each resource now.`, 'win');
+      changed = true;
+    }
+    if (timers.garage && timerRemaining('garage') <= 0) {
+      state.garageLevel += 1;
+      timers.garage = null;
+      addLog(`Garage upgraded to level ${state.garageLevel}. Producing ${garageOutput().toFixed(1)} fuel/s now.`, 'win');
+      changed = true;
+    }
+    if (state.eventEndsAt <= performance.now()) {
+      state.eventPoints = 0;
+      state.eventEndsAt = performance.now() + EVENT_DURATION_MS;
+      EVENT_MILESTONES.forEach((m, i) => { m['claimed' + i] = false; });
+      addLog('A new weekly push has begun.', 'hub');
+      changed = true;
+    }
+    if (state.governorCycleEndsAt <= performance.now()) {
+      const wasHeld = state.governorHeld;
+      state.governorHeld = false;
+      GOVERNOR.power = rollGovernorPower();
+      GOVERNOR.scouted = false;
+      state.governorCycleEndsAt = performance.now() + GOVERNOR_CYCLE_MS;
+      addLog(
+        wasHeld
+          ? 'Your hold on the city ended — the Governor\'s Office is back up for grabs.'
+          : 'The Governor\'s Office cycle reset — the city is contestable again.',
+        'hub'
+      );
+      changed = true;
+    }
+
+    renderDeployOverlay();
+    if (changed || mansionModal.classList.contains('open')) render();
+  }, 500);
+
+  // ---- save / load (this file runs standalone in your own browser, so
+  // localStorage persists here — reopening the same file picks up the save) ----
+  const SAVE_KEY = 'syndicate-map-save-v1';
+  function msRemaining(ts) { return Math.max(0, ts - performance.now()); }
+
+  // hero.march holds absolute performance.now()-based timestamps, which are
+  // meaningless after a reload (the clock resets to 0) — save/restore them
+  // the same "time remaining" way the game already handles build/train timers
+  function serializeMarch(m) {
+    if (!m) return null;
+    const now = performance.now();
+    return {
+      kind: m.kind, refName: m.refName,
+      formation: m.formation ? { ...m.formation } : null,
+      fromX: m.fromX, fromY: m.fromY, toX: m.toX, toY: m.toY,
+      arrived: !!m.arrived, resolved: !!m.resolved,
+      departRemainMs: m.departAt - now,
+      arriveRemainMs: m.arriveAt - now,
+      resolveRemainMs: m.resolveAt != null ? m.resolveAt - now : null,
+      returnDepartRemainMs: m.returnDepartAt != null ? m.returnDepartAt - now : null,
+      returnArriveRemainMs: m.returnArriveAt != null ? m.returnArriveAt - now : null,
+      returnToX: m.returnToX, returnToY: m.returnToY,
+    };
+  }
+  function deserializeMarch(sm) {
+    if (!sm) return null;
+    const now = performance.now();
+    return {
+      kind: sm.kind, refName: sm.refName,
+      formation: sm.formation ? { ...sm.formation } : null,
+      fromX: sm.fromX, fromY: sm.fromY, toX: sm.toX, toY: sm.toY,
+      arrived: !!sm.arrived, resolved: !!sm.resolved,
+      departAt: now + sm.departRemainMs,
+      arriveAt: now + sm.arriveRemainMs,
+      resolveAt: sm.resolveRemainMs != null ? now + sm.resolveRemainMs : null,
+      returnDepartAt: sm.returnDepartRemainMs != null ? now + sm.returnDepartRemainMs : null,
+      returnArriveAt: sm.returnArriveRemainMs != null ? now + sm.returnArriveRemainMs : null,
+      returnToX: sm.returnToX, returnToY: sm.returnToY,
+    };
+  }
+
+  function buildSavePayload() {
+    return {
+      v: 1,
+      state: {
+        level: state.level, xp: state.xp, xpToLevel: state.xpToLevel,
+        coins: state.coins, speedLevel: state.speedLevel,
+        mansionLevel: state.mansionLevel, barracksLevel: state.barracksLevel,
+        troopTypes: JSON.parse(JSON.stringify(state.troopTypes)),
+        hospitalLevel: state.hospitalLevel, warehouseLevel: state.warehouseLevel,
+        garageLevel: state.garageLevel,
+        relocateRemainMs: msRemaining(state.relocateReadyAt),
+        dailyRemainMs: msRemaining(state.dailyReadyAt),
+        resources: { ...state.resources },
+        eventPoints: state.eventPoints,
+        eventRemainMs: msRemaining(state.eventEndsAt),
+        governorHeld: state.governorHeld,
+        governorCycleRemainMs: msRemaining(state.governorCycleEndsAt),
+        baseX: BASE.x, baseY: BASE.y,
+      },
+      heroes: heroes.map(h => ({
+        id: h.id,
+        stamina: h.stamina,
+        level: h.level,
+        state: h.state,
+        farmingHub: h.farmingHub,
+        x: h.x, y: h.y,
+        formation: h.formation ? { ...h.formation } : null,
+        march: serializeMarch(h.march),
+      })),
+      selectedId,
+      targets: targets.map(t => ({
+        name: t.name, health: t.health, deadRemainMs: msRemaining(t.deadUntil),
+        x: t.x, y: t.y, homeX: t.homeX, homeY: t.homeY,
+      })),
+      hubs: hubs.map(h => ({ id: h.id, reserve: h.reserve, depletedRemainMs: msRemaining(h.depletedUntil) })),
+      quests: quests.map(q => ({ id: q.id, progress: q.progress, claimed: q.claimed })),
+      rivalBases: rivalBases.map(rb => ({ name: rb.name, scouted: rb.scouted, deadRemainMs: msRemaining(rb.defeatedUntil), x: rb.x, y: rb.y })),
+      governor: { power: GOVERNOR.power, scouted: GOVERNOR.scouted },
+      milestonesClaimed: EVENT_MILESTONES.map((m, i) => !!m['claimed' + i]),
+      inventory: { ...inventory },
+      timers: Object.fromEntries(
+        Object.keys(timers).map(key => {
+          const t = timers[key];
+          if (!t) return [key, null];
+          return [key, {
+            remainMs: msRemaining(t.endsAt),
+            totalMs: t.endsAt - t.startedAt,
+            meta: t.meta || null,
+          }];
+        })
+      ),
+      camera: { x: camera.x, y: camera.y },
+    };
+  }
+
+  function saveGame() {
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(buildSavePayload()));
+    } catch (e) { /* storage unavailable this session — game still works, just won't persist */ }
+  }
+
+  function applySavePayload(save) {
+    Object.assign(state, {
+      level: save.state.level, xp: save.state.xp, xpToLevel: save.state.xpToLevel,
+      coins: save.state.coins, speedLevel: save.state.speedLevel,
+      mansionLevel: save.state.mansionLevel, barracksLevel: save.state.barracksLevel,
+      hospitalLevel: save.state.hospitalLevel || 1,
+      warehouseLevel: save.state.warehouseLevel || 1,
+      garageLevel: save.state.garageLevel || 1,
+      relocateReadyAt: performance.now() + (save.state.relocateRemainMs || 0),
+      dailyReadyAt: performance.now() + save.state.dailyRemainMs,
+      eventPoints: save.state.eventPoints,
+      eventEndsAt: performance.now() + save.state.eventRemainMs,
+      governorHeld: !!save.state.governorHeld,
+      governorCycleEndsAt: performance.now() + (save.state.governorCycleRemainMs != null ? save.state.governorCycleRemainMs : GOVERNOR_CYCLE_MS),
+    });
+    Object.assign(state.resources, save.state.resources);
+    if (state.resources.fuel == null) state.resources.fuel = 0;
+    if (save.state.baseX != null) BASE.x = save.state.baseX;
+    if (save.state.baseY != null) BASE.y = save.state.baseY;
+
+    if (save.state.troopTypes) {
+      Object.assign(state.troopTypes.enforcer, save.state.troopTypes.enforcer);
+      Object.assign(state.troopTypes.gunner, save.state.troopTypes.gunner);
+      Object.assign(state.troopTypes.driver, save.state.troopTypes.driver);
+    } else if (typeof save.state.troops === 'number') {
+      // migrating an older save that had one flat troop pool — drop it all into Gunners
+      state.troopTypes.gunner.active = save.state.troops;
+      state.troopTypes.gunner.wounded = save.state.woundedTroops || 0;
+    }
+
+    heroes.length = 0;
+    save.heroes.forEach(sh => {
+      const h = makeHero(sh.id);
+      h.stamina = sh.stamina;
+      h.level = sh.level || 1;
+      h.state = sh.state;
+      h.farmingHub = sh.farmingHub;
+      h.x = sh.x; h.y = sh.y;
+      h.march = deserializeMarch(sh.march);
+      if (h.march) {
+        // keep hero.formation and march.formation pointing at the same object —
+        // advanceMarch mutates it (wounding) and expects both to stay in sync
+        h.formation = h.march.formation;
+      } else if (h.state === 'farming' && sh.formation) {
+        h.formation = { ...sh.formation };
+      } else if (sh.formation) {
+        // an orphaned formation with no march and not farming shouldn't normally
+        // happen, but if an older save has one, hand the troops back rather
+        // than leaving them permanently "deployed" nowhere
+        const orphan = sh.formation;
+        TROOP_TYPES.forEach(t => { state.troopTypes[t.key].active += (orphan[t.key] || 0); });
+      }
+      heroes.push(h);
+    });
+    selectedId = save.selectedId;
+
+    save.targets.forEach(st => {
+      const t = targets.find(tt => tt.name === st.name);
+      if (!t) return;
+      t.health = st.health;
+      t.deadUntil = performance.now() + st.deadRemainMs;
+      if (st.x != null) t.x = st.x;
+      if (st.y != null) t.y = st.y;
+      if (st.homeX != null) t.homeX = st.homeX;
+      if (st.homeY != null) t.homeY = st.homeY;
+    });
+
+    save.quests.forEach(sq => {
+      const q = quests.find(qq => qq.id === sq.id);
+      if (q) { q.progress = sq.progress; q.claimed = sq.claimed; }
+    });
+
+    (save.rivalBases || []).forEach(srb => {
+      const rb = rivalBases.find(rr => rr.name === srb.name);
+      if (rb) {
+        rb.scouted = srb.scouted;
+        rb.defeatedUntil = performance.now() + srb.deadRemainMs;
+        if (srb.x != null) rb.x = srb.x;
+        if (srb.y != null) rb.y = srb.y;
+      }
+    });
+
+    (save.hubs || []).forEach(shb => {
+      const h = hubById(shb.id);
+      if (!h) return;
+      h.reserve = shb.reserve != null ? shb.reserve : h.maxReserve;
+      h.depletedUntil = performance.now() + (shb.depletedRemainMs || 0);
+    });
+
+    if (save.governor) {
+      GOVERNOR.power = save.governor.power || rollGovernorPower();
+      GOVERNOR.scouted = !!save.governor.scouted;
+    }
+
+    (save.milestonesClaimed || []).forEach((claimed, i) => {
+      if (EVENT_MILESTONES[i]) EVENT_MILESTONES[i]['claimed' + i] = claimed;
+    });
+
+    Object.keys(inventory).forEach(k => delete inventory[k]);
+    Object.assign(inventory, save.inventory || {});
+
+    Object.keys(timers).forEach(key => {
+      const saved = save.timers && save.timers[key];
+      if (saved) {
+        timers[key] = {
+          startedAt: performance.now() - (saved.totalMs - saved.remainMs),
+          endsAt: performance.now() + saved.remainMs,
+          meta: saved.meta || null,
+        };
+      } else {
+        timers[key] = null;
+      }
+    });
+
+    if (save.camera) { camera.x = save.camera.x; camera.y = save.camera.y; clampCamera(); }
+  }
+
+  function loadGame() {
+    let raw;
+    try { raw = localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
+    if (!raw) return false;
+    let save;
+    try { save = JSON.parse(raw); } catch (e) { return false; }
+    applySavePayload(save);
+    return true;
+  }
+
+  function exportSaveCode() {
+    const json = JSON.stringify(buildSavePayload());
+    return btoa(unescape(encodeURIComponent(json)));
+  }
+
+  function importSaveCode(code) {
+    try {
+      const json = decodeURIComponent(escape(atob(code.trim())));
+      const save = JSON.parse(json);
+      applySavePayload(save);
+      saveGame();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    if (!confirm('Reset all progress? This clears your save and cannot be undone.')) return;
+    try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+    location.reload();
+  });
+
+  document.getElementById('exportBtn').addEventListener('click', () => {
+    const code = exportSaveCode();
+    const box = document.getElementById('exportCode');
+    box.value = code;
+    document.getElementById('copyExportBtn').style.display = 'inline-block';
+    document.getElementById('exportStatus').textContent = 'Code generated — copy it and paste it into the same room on your other device.';
+  });
+
+  document.getElementById('copyExportBtn').addEventListener('click', () => {
+    const box = document.getElementById('exportCode');
+    box.select();
+    box.setSelectionRange(0, 99999);
+    const status = document.getElementById('exportStatus');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(box.value)
+        .then(() => { status.textContent = 'Copied to clipboard.'; })
+        .catch(() => {
+          document.execCommand('copy');
+          status.textContent = 'Copied.';
+        });
+    } else {
+      document.execCommand('copy');
+      status.textContent = 'Copied.';
+    }
+  });
+
+  document.getElementById('importBtn').addEventListener('click', () => {
+    const code = document.getElementById('importCode').value;
+    const status = document.getElementById('importStatus');
+    if (!code.trim()) { status.textContent = 'Paste a code first.'; return; }
+    if (!confirm('This replaces your current progress on this device with the pasted save. Continue?')) return;
+    const ok = importSaveCode(code);
+    if (ok) {
+      status.textContent = 'Loaded! Your progress here now matches the code.';
+      addLog('Progress synced from another device.', 'hub');
+      render();
+    } else {
+      status.textContent = "That code didn't work — make sure you copied the whole thing.";
+    }
+  });
+
+  const restored = loadGame();
+  setInterval(saveGame, 5000);
+  window.addEventListener('beforeunload', saveGame);
+
+  render();
+  if (restored) addLog('Welcome back — progress restored.', 'hub');
+</script>
+</body>
+</html>

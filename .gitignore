@@ -1,0 +1,12 @@
+# Secrets — never commit
+.tools/.env
+
+# Large CLI binaries — not needed to host the game, just tools used locally
+.tools/*.exe
+
+# Supabase CLI local cache/scratch
+supabase/.temp/
+supabase/supabase/
+
+# Misc local scratch
+server.log

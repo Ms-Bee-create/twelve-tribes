@@ -1,0 +1,16 @@
+{
+  "name": "Twelve Tribes",
+  "short_name": "Twelve Tribes",
+  "description": "A raiding and rivalry strategy game",
+  "start_url": "./syndicate-prototype-v26.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#191510",
+  "theme_color": "#191510",
+  "icons": [
+    { "src": "icon.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
