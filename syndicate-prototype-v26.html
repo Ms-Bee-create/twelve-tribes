@@ -953,7 +953,7 @@
     </div>
 
     <div class="room-body theme-garage" id="room-garage" style="display:none">
-      <p class="room-intro">The only place oil comes from. Burn it in the lanterns that light the way when the camp breaks and moves.</p>
+      <p class="room-intro">The only place oil comes from. Burn it in the lanterns that light the way when the camp breaks and moves. Production fills up a stockpile that needs collecting once it's full.</p>
       <div class="item-card">
         <div class="item-info">
           <div class="item-name">Oil Press</div>
@@ -965,6 +965,13 @@
           <div class="token-use-row" id="garageTokenRow"></div>
         </div>
         <button class="gold-btn" id="garageBtn">Upgrade</button>
+      </div>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Collect Oil</div>
+          <div class="item-meta" id="garageCollectMeta">0.0 / 0.0 oil ready.</div>
+        </div>
+        <button class="gold-btn" id="garageCollectBtn">Collect</button>
       </div>
       <div class="item-card">
         <div class="item-info">
@@ -982,7 +989,7 @@
     </div>
 
     <div class="room-body theme-fieldlumber" id="room-fieldlumber" style="display:none">
-      <p class="room-intro">Three plots, cut and hauled without needing a hero standing over them. Slower than a raid, but it never stops. Each plot is built and upgraded on its own — Plot 2 unlocks at Camp level 3, Plot 3 at Camp level 6.</p>
+      <p class="room-intro">Three plots, cut and hauled without needing a hero standing over them. Slower than a raid, but builds up a stockpile that needs collecting once it fills — no hero required. Each plot is built and upgraded on its own — Plot 2 unlocks at Camp level 3, Plot 3 at Camp level 6.</p>
       <div class="item-card">
         <div class="item-info">
           <div class="item-name">Lumber Yard</div>
@@ -995,11 +1002,18 @@
         </div>
         <button class="gold-btn" id="fieldlumberBtn">Upgrade</button>
       </div>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Collect Lumber</div>
+          <div class="item-meta" id="fieldlumberCollectMeta">0 / 0 ready.</div>
+        </div>
+        <button class="gold-btn" id="fieldlumberCollectBtn">Collect</button>
+      </div>
       <div id="fieldlumberList"></div>
     </div>
 
     <div class="room-body theme-fieldgrain" id="room-fieldgrain" style="display:none">
-      <p class="room-intro">Three plots, threshed and stored without needing a hero standing over them. Slower than a raid, but it never stops. Each plot is built and upgraded on its own — Plot 2 unlocks at Camp level 3, Plot 3 at Camp level 6.</p>
+      <p class="room-intro">Three plots, threshed and stored without needing a hero standing over them. Slower than a raid, but builds up a stockpile that needs collecting once it fills — no hero required. Each plot is built and upgraded on its own — Plot 2 unlocks at Camp level 3, Plot 3 at Camp level 6.</p>
       <div class="item-card">
         <div class="item-info">
           <div class="item-name">The Threshing Floor</div>
@@ -1012,11 +1026,18 @@
         </div>
         <button class="gold-btn" id="fieldgrainBtn">Upgrade</button>
       </div>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Collect Grain</div>
+          <div class="item-meta" id="fieldgrainCollectMeta">0 / 0 ready.</div>
+        </div>
+        <button class="gold-btn" id="fieldgrainCollectBtn">Collect</button>
+      </div>
       <div id="fieldgrainList"></div>
     </div>
 
     <div class="room-body theme-fieldwater" id="room-fieldwater" style="display:none">
-      <p class="room-intro">Three plots, drawn and stored without needing a hero standing over them. Slower than a raid, but it never stops. Each plot is built and upgraded on its own — Plot 2 unlocks at Camp level 3, Plot 3 at Camp level 6.</p>
+      <p class="room-intro">Three plots, drawn and stored without needing a hero standing over them. Slower than a raid, but builds up a stockpile that needs collecting once it fills — no hero required. Each plot is built and upgraded on its own — Plot 2 unlocks at Camp level 3, Plot 3 at Camp level 6.</p>
       <div class="item-card">
         <div class="item-info">
           <div class="item-name">The Cistern</div>
@@ -1028,6 +1049,13 @@
           <div class="token-use-row" id="fieldwaterTokenRow"></div>
         </div>
         <button class="gold-btn" id="fieldwaterBtn">Upgrade</button>
+      </div>
+      <div class="item-card">
+        <div class="item-info">
+          <div class="item-name">Collect Water</div>
+          <div class="item-meta" id="fieldwaterCollectMeta">0 / 0 ready.</div>
+        </div>
+        <button class="gold-btn" id="fieldwaterCollectBtn">Collect</button>
       </div>
       <div id="fieldwaterList"></div>
     </div>
@@ -1296,6 +1324,13 @@
     // the site itself, separate from its 3 plots — leveling it boosts every
     // plot's output instead of adding a new plot slot
     fieldLevels: { lumber: 1, food: 1, water: 1 },
+    // Production buildings (Oil Press + the 3 field types) fill this buffer
+    // instead of crediting resources directly — once it hits its cap
+    // (PRODUCTION_BUFFER_HOURS worth), the building stops producing until
+    // manually collected, same "check in and collect" pattern most city-
+    // builders use rather than an unlimited passive drip.
+    pendingFuel: 0,
+    pendingField: { lumber: 0, food: 0, water: 0 },
     capacityBoostPct: 0, capacityBoostEndsAt: 0, // Store's temporary Deployment Capacity Boost
     buildSlotBoostEndsAt: 0, researchSlotBoostEndsAt: 0, // Store's temporary 2nd build/research queue slot (24h each)
     avatarKey: 'default',
@@ -2167,6 +2202,12 @@
   function garageOutput() { return 0.4 * state.garageLevel; }
   function garageResourceCost() { return { lumber: 18 * state.garageLevel }; }
   function garageBuildMs() { return Math.round(195000 * Math.pow(state.garageLevel, 1.5) * (1 - researchBonusPct('build_speed'))); }
+  // How long a production building can run unattended before its buffer
+  // fills up and it stops — a real ceiling, not a soft slowdown, so
+  // "collect it or it stops" is a genuine choice rather than a suggestion.
+  const PRODUCTION_BUFFER_HOURS = 8;
+  function garageBufferCap() { return garageOutput() * 3600 * PRODUCTION_BUFFER_HOURS; }
+  function fieldBufferCap(resourceKey) { return fieldResourceTotalPerHour(resourceKey) * PRODUCTION_BUFFER_HOURS; }
 
   // Passive resource buildings — 3 independently-built plots per resource, same
   // "produces automatically every tick, scales with level" idea as the Oil
@@ -5242,6 +5283,13 @@
       garageBtn.disabled = false;
     }
 
+    const garageCap = garageBufferCap();
+    const garageFull = state.pendingFuel >= garageCap;
+    document.getElementById('garageCollectMeta').textContent =
+      `${state.pendingFuel.toFixed(1)} / ${garageCap.toFixed(1)} oil ready.${garageFull ? ' Full — production stopped until collected.' : ''}`;
+    const garageCollectBtn = document.getElementById('garageCollectBtn');
+    garageCollectBtn.disabled = state.pendingFuel <= 0;
+
     document.getElementById('mansionCoordsMeta').textContent = `X ${Math.round(BASE.x)}, Y ${Math.round(BASE.y)}`;
 
     const relocateBtn = document.getElementById('relocateBtn');
@@ -5286,6 +5334,13 @@
       siteBtn.textContent = `Upgrade — ${fmtResourceCost(siteRes)}, ${fmtSecs(fieldSiteBuildMs(field))}`;
       siteBtn.disabled = false;
     }
+
+    const fieldCap = fieldBufferCap(field.key);
+    const pending = state.pendingField[field.key];
+    const fieldFull = fieldCap > 0 && pending >= fieldCap;
+    document.getElementById(field.room + 'CollectMeta').textContent =
+      `${pending.toFixed(0)} / ${fieldCap.toFixed(0)} ${RESOURCE_LABELS[field.key] || field.key} ready.${fieldFull ? ' Full — production stopped until collected.' : ''}`;
+    document.getElementById(field.room + 'CollectBtn').disabled = pending <= 0;
 
     const list = document.getElementById(field.room + 'List');
     list.innerHTML = '';
@@ -6136,6 +6191,16 @@
     render();
   });
 
+  document.getElementById('garageCollectBtn').addEventListener('click', () => {
+    if (state.pendingFuel <= 0) return;
+    const cap = resourceCap();
+    const collected = Math.min(state.pendingFuel, Math.max(0, cap - state.resources.fuel));
+    state.resources.fuel += collected;
+    state.pendingFuel -= collected;
+    addLog(`Collected ${collected.toFixed(1)} oil from the Oil Press.`, 'win', 'gathering');
+    render();
+  });
+
   document.getElementById('researchLabBtn').addEventListener('click', () => {
     if (timers.researchLab) {
       const cost = rushCost(timerRemaining('researchLab'));
@@ -6178,6 +6243,16 @@
       spendResources(resCost);
       startTimer(timerKey, fieldSiteBuildMs(field));
       addLog(`${field.label} upgrade underway — ${fmtSecs(fieldSiteBuildMs(field))}.`, 'hub', 'building');
+      render();
+    });
+    document.getElementById(field.room + 'CollectBtn').addEventListener('click', () => {
+      const pending = state.pendingField[field.key];
+      if (pending <= 0) return;
+      const cap = resourceCap();
+      const collected = Math.min(pending, Math.max(0, cap - state.resources[field.key]));
+      state.resources[field.key] += collected;
+      state.pendingField[field.key] -= collected;
+      addLog(`Collected ${collected.toFixed(0)} ${RESOURCE_LABELS[field.key] || field.key} from ${field.label}.`, 'win', 'gathering');
       render();
     });
   });
@@ -6267,14 +6342,15 @@
       state.coins += 4; // running the city pays out while you hold it
       changed = true;
     }
-    if (garageOutput() > 0) {
-      state.resources.fuel = Math.min(cap, state.resources.fuel + garageOutput());
+    if (garageOutput() > 0 && state.pendingFuel < garageBufferCap()) {
+      state.pendingFuel = Math.min(garageBufferCap(), state.pendingFuel + garageOutput());
       changed = true;
     }
     FIELD_TYPES.forEach(field => {
       const perHour = fieldResourceTotalPerHour(field.key);
-      if (perHour > 0) {
-        state.resources[field.key] = Math.min(cap, state.resources[field.key] + perHour / 3600);
+      const fieldCap = fieldBufferCap(field.key);
+      if (perHour > 0 && state.pendingField[field.key] < fieldCap) {
+        state.pendingField[field.key] = Math.min(fieldCap, state.pendingField[field.key] + perHour / 3600);
         changed = true;
       }
     });
@@ -6491,6 +6567,8 @@
         capacityBoostRemainMs: msRemaining(state.capacityBoostEndsAt),
         buildSlotBoostRemainMs: msRemaining(state.buildSlotBoostEndsAt),
         researchSlotBoostRemainMs: msRemaining(state.researchSlotBoostEndsAt),
+        pendingFuel: state.pendingFuel,
+        pendingField: { ...state.pendingField },
         avatarKey: state.avatarKey,
         formationPresets: state.formationPresets.map(p => p ? { ...p } : null),
         settings: { ...state.settings },
@@ -6597,6 +6675,8 @@
       capacityBoostEndsAt: performance.now() + catchUpMs(save.state.capacityBoostRemainMs),
       buildSlotBoostEndsAt: performance.now() + catchUpMs(save.state.buildSlotBoostRemainMs),
       researchSlotBoostEndsAt: performance.now() + catchUpMs(save.state.researchSlotBoostRemainMs),
+      pendingFuel: save.state.pendingFuel || 0,
+      pendingField: { lumber: 0, food: 0, water: 0, ...(save.state.pendingField || {}) },
       avatarKey: save.state.avatarKey || 'default',
       formationPresets: (save.state.formationPresets || [null, null, null, null, null]).map(p => p ? { ...p } : null),
       settings: { autoOpenCamp: true, reduceMotion: false, notifyBuildDone: false, notifyRaided: false, soundEnabled: false, ...(save.state.settings || {}) },
@@ -6615,12 +6695,11 @@
     // end-timestamp" shape as stamina/farming above — credit the real time
     // that passed directly rather than only ticking once the app reopens.
     if (offlineElapsedMs > 0) {
-      const cap = resourceCap();
       const secs = offlineElapsedMs / 1000;
-      if (garageOutput() > 0) state.resources.fuel = Math.min(cap, state.resources.fuel + garageOutput() * secs);
+      if (garageOutput() > 0) state.pendingFuel = Math.min(garageBufferCap(), state.pendingFuel + garageOutput() * secs);
       FIELD_TYPES.forEach(field => {
         const perHour = fieldResourceTotalPerHour(field.key);
-        if (perHour > 0) state.resources[field.key] = Math.min(cap, state.resources[field.key] + (perHour / 3600) * secs);
+        if (perHour > 0) state.pendingField[field.key] = Math.min(fieldBufferCap(field.key), state.pendingField[field.key] + (perHour / 3600) * secs);
       });
     }
 
