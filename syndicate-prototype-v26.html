@@ -8295,7 +8295,12 @@
         const raidMsg = anyStolen
           ? `While you were away: ${attackerName} raided you and made off with some wounded troops.`
           : `While you were away: ${attackerName} raided you but came away with nothing but coin.`;
-        addLog(raidMsg, 'lose', 'combat');
+        // defender_losses is a real per-troop-type breakdown the server
+        // already computed (added alongside the Prison feature) — older
+        // rows from before that migration default to empty, same shape
+        // formatLossDetail() already expects for the attacker's own reports.
+        const defLosses = (row.defender_losses && row.defender_losses.killed) ? row.defender_losses : { killed: {}, wounded: {} };
+        addLog(raidMsg, 'lose', 'combat', formatLossDetail(defLosses));
         if (state.settings.notifyRaided) fireNotification('Twelve Tribes', raidMsg);
         localStorage.setItem(MP_SEEN_RAID_KEY, String(row.id));
       });

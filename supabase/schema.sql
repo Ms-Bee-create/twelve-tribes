@@ -84,6 +84,10 @@ create table raid_log (
   won boolean not null,
   coin_reward integer not null default 0,
   troops_stolen jsonb not null default '{}'::jsonb,
+  -- real per-troop-type killed/wounded breakdown for the defender's side,
+  -- so their "while you were away" report can be as detailed as the
+  -- attacker's own real-time one
+  defender_losses jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
 

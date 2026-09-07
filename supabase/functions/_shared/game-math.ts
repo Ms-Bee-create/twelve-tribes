@@ -80,21 +80,27 @@ export function resolveCombatBand(ratio: number): CombatResult {
 // Flat for now; research-based mitigation is a deliberate later addition.
 const DEFENDER_KILL_SHARE = 0.2;
 
+export interface LossBreakdown { killed: Record<string, number>; wounded: Record<string, number>; }
+
 // moves lossPct of each present tier in troops-object `defender` (proportionally)
-// from active into wounded (minus the killed share), in place, and returns how
-// many tier-keys moved so callers can decide whether the update is worth writing back
-export function applyDefenderLosses(defender: TroopsObj, lossPct: number): Record<string, number> {
-  const moved: Record<string, number> = {};
+// from active into wounded (minus the killed share), in place, and returns a
+// real per-troop-type killed/wounded breakdown -- lets the defender's own
+// "while you were away" report be just as detailed as the attacker's,
+// mirroring the game file's own formatLossDetail().
+export function applyDefenderLosses(defender: TroopsObj, lossPct: number): LossBreakdown {
+  const killed: Record<string, number> = {};
+  const wounded: Record<string, number> = {};
   TROOP_TYPES.forEach((t) => {
     const pool = defender[t.key];
     if (!pool || pool.active <= 0) return;
     const hit = Math.round(pool.active * lossPct);
     if (hit <= 0) return;
-    const killed = Math.round(hit * DEFENDER_KILL_SHARE);
-    const wounded = hit - killed;
+    const k = Math.round(hit * DEFENDER_KILL_SHARE);
+    const w = hit - k;
     pool.active -= hit;
-    pool.wounded += wounded;
-    moved[t.key] = hit;
+    pool.wounded += w;
+    if (k > 0) killed[t.key] = k;
+    if (w > 0) wounded[t.key] = w;
   });
-  return moved;
+  return { killed, wounded };
 }

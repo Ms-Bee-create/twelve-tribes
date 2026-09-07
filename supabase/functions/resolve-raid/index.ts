@@ -17,6 +17,11 @@
 // captured by the winner. Defense now also factors in a Wall garrison (a
 // hero stationed at home) and Fortification research, same as the game
 // file's own preview math.
+//
+// raid_log now also stores the defender's real per-troop-type killed/
+// wounded breakdown (defender_losses) -- lets the defender's own "while
+// you were away" report be just as detailed as the attacker's real-time
+// one, mirroring the game file's own formatLossDetail().
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -96,6 +101,7 @@ Deno.serve(async (req) => {
 
     let coinReward = 0;
     const stolen: Record<string, number> = {};
+    let defenderLosses: { killed: Record<string, number>; wounded: Record<string, number> } = { killed: {}, wounded: {} };
     let defenderHeroCaptured: { id: number; name: string; level: number } | null = null;
     let attackerHeroCaptured: { id: number; name: string; level: number } | null = null;
     let freedOwnCaptives = 0;
@@ -104,7 +110,7 @@ Deno.serve(async (req) => {
       coinReward = Math.round(120 + defensePower * 1.5 + Math.random() * defensePower);
 
       const defenderTroops = JSON.parse(JSON.stringify(defender.troops));
-      applyDefenderLosses(defenderTroops, result.defenderLossPct);
+      defenderLosses = applyDefenderLosses(defenderTroops, result.defenderLossPct);
       TROOP_TYPES.forEach((t) => {
         const pool = defenderTroops[t.key];
         if (!pool) return;
@@ -172,6 +178,7 @@ Deno.serve(async (req) => {
       won: result.won,
       coin_reward: coinReward,
       troops_stolen: stolen,
+      defender_losses: defenderLosses,
     });
 
     return json({
