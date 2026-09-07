@@ -116,7 +116,8 @@
     background: rgba(21,18,15,0.85);
     color: var(--gold);
     padding: 6px 14px;
-    pointer-events: none;
+    pointer-events: auto;
+    cursor: pointer;
     z-index: 2;
   }
 
@@ -787,6 +788,16 @@
       <button class="gold-btn" id="staminaUseWineBtn">Use a Skin of Wine (+20 stamina)</button>
       <button class="gold-btn" id="staminaOpenMarketBtn">Buy more at the Market</button>
       <button id="staminaCancelBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="formation-backdrop" id="powerBreakdownModal">
+  <div class="formation-panel" style="max-width:360px;">
+    <div class="formation-title">Power Breakdown</div>
+    <div id="powerBreakdownList" style="max-height:50vh; overflow-y:auto;"></div>
+    <div class="formation-actions stacked">
+      <button id="powerBreakdownCloseBtn">Close</button>
     </div>
   </div>
 </div>
@@ -2665,7 +2676,10 @@
   }
   function resourceCap() { return Math.round((1000 * Math.pow(maxFieldLevelReached(), 1.5)) * (1 + researchBonusPct('warehouse_capacity'))); }
 
-  function powerRating() {
+  // Every named contribution to powerRating(), in one place, so the power
+  // badge's breakdown popup and the actual total can never drift apart —
+  // powerRating() is just this list summed.
+  function powerBreakdown() {
     const heroLevelSum = heroes.reduce((sum, h) => sum + h.level, 0);
     // Rise of Kingdoms' own formula is "troops x troop power," not a flat
     // count — a tier-III Rider is worth more power than a tier-I Shieldbearer,
@@ -2675,24 +2689,25 @@
     const fieldLevelSum = FIELD_TYPES.reduce((sum, f) => sum + state.resourceBuildings[f.key].reduce((s, l) => s + l, 0), 0);
     const fieldSiteLevelSum = FIELD_TYPES.reduce((sum, f) => sum + state.fieldLevels[f.key], 0);
     const gearTierSum = state.gearInventory.reduce((sum, item) => sum + item.tier, 0);
-    return Math.round(
-      state.level * 20 +
-      state.mansionLevel * 50 +
-      state.barracksLevel * 30 +
-      state.hospitalLevel * 20 +
-      state.warehouseLevel * 20 +
-      state.speedLevel * 15 +
-      state.garageLevel * 20 +
-      state.researchLevel * 20 +
-      totalResearchLevels() * 8 +
-      gearTierSum * 15 +
-      heroLevelSum * 25 +
-      troopSum * 1 +
-      fieldLevelSum * 10 +
-      fieldSiteLevelSum * 15 +
-      (state.governorHeld ? 150 : 0)
-    );
+    return [
+      { label: 'Account level', value: state.level * 20 },
+      { label: 'The Camp', value: state.mansionLevel * 50 },
+      { label: 'Muster', value: state.barracksLevel * 30 },
+      { label: "Healer's Tent", value: state.hospitalLevel * 20 },
+      { label: 'Storehouse', value: state.warehouseLevel * 20 },
+      { label: 'Sandals', value: state.speedLevel * 15 },
+      { label: 'Oil Press', value: state.garageLevel * 20 },
+      { label: "Scribes' Tent", value: state.researchLevel * 20 },
+      { label: 'Research completed', value: totalResearchLevels() * 8 },
+      { label: 'Forge gear', value: Math.round(gearTierSum * 15) },
+      { label: 'Chieftains', value: Math.round(heroLevelSum * 25) },
+      { label: 'Troops', value: Math.round(troopSum * 1) },
+      { label: 'Field plots', value: Math.round(fieldLevelSum * 10) },
+      { label: 'Field sites', value: Math.round(fieldSiteLevelSum * 15) },
+      { label: "The City Gate", value: state.governorHeld ? 150 : 0 },
+    ];
   }
+  function powerRating() { return Math.round(powerBreakdown().reduce((sum, e) => sum + e.value, 0)); }
 
   function rushCost(remainingMs) { return Math.max(20, Math.ceil((remainingMs / 1000) * 2)); }
 
@@ -5311,6 +5326,30 @@
     render();
   });
   document.getElementById('staminaCancelBtn').addEventListener('click', closeStaminaModal);
+
+  // Exactly where every point of the power badge comes from — reuses
+  // powerBreakdown() directly, so this can never drift from the real total.
+  function openPowerBreakdown() {
+    const list = document.getElementById('powerBreakdownList');
+    list.innerHTML = '';
+    const rows = powerBreakdown();
+    rows.forEach(e => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--stone-line); font-size:13px;';
+      row.innerHTML = `<span>${e.label}</span><span>${Math.round(e.value)}</span>`;
+      list.appendChild(row);
+    });
+    const total = document.createElement('div');
+    total.style.cssText = 'display:flex; justify-content:space-between; padding:10px 0 2px; font-family:Oswald,sans-serif; font-weight:600;';
+    total.innerHTML = `<span>Total</span><span style="color:var(--gold);">${powerRating()}</span>`;
+    list.appendChild(total);
+    document.getElementById('powerBreakdownModal').classList.add('open');
+  }
+  function closePowerBreakdown() {
+    document.getElementById('powerBreakdownModal').classList.remove('open');
+  }
+  document.getElementById('powerLabel').addEventListener('click', openPowerBreakdown);
+  document.getElementById('powerBreakdownCloseBtn').addEventListener('click', closePowerBreakdown);
 
   function clampCamera() {
     const viewW = canvas.width / zoom, viewH = canvas.height / zoom;
