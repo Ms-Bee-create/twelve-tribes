@@ -375,6 +375,8 @@
 
   .log-panel { border: 1px solid var(--stone-line); background: #171310; padding: 4px 16px; max-height: 150px; overflow-y: auto; }
   .log-entry { font-size: 14px; padding: 10px 0; border-bottom: 1px solid var(--stone-line); line-height: 1.5; }
+  .log-entry-detail { margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--stone-line); font-size: 12px; color: var(--paper-dim); }
+  .log-entry-detail div { padding: 2px 0; }
   .log-entry:last-child { border-bottom: none; }
   .log-entry.win { color: var(--gold); }
   .log-entry.lose { color: #c98a7f; }
@@ -1296,10 +1298,14 @@
       </div>
       <div class="item-name" style="margin: 16px 0 8px;">Economy</div>
       <div id="researchEconomyList"></div>
-      <div class="item-name" style="margin: 16px 0 8px;">Hero</div>
-      <div id="researchHeroList"></div>
+      <div class="item-name" style="margin: 16px 0 8px;">Arms</div>
+      <div id="researchArmsList"></div>
+      <div class="item-name" style="margin: 16px 0 8px;">Crew</div>
+      <div id="researchCrewList"></div>
       <div class="item-name" style="margin: 16px 0 8px;">Defense</div>
       <div id="researchDefenseList"></div>
+      <div class="item-name" style="margin: 16px 0 8px;">Hospital</div>
+      <div id="researchHospitalList"></div>
     </div>
 
     <div class="room-body theme-armory" id="room-armory" style="display:none">
@@ -1364,6 +1370,8 @@
     // dailyReadyAt above.
     trial: { attemptsUsed: 0, resetAt: 0, stage: 1 },
     wallGarrison: [], // hero ids currently stationed defending home (see wallGarrisonCapacity())
+    lootTally: {}, // item name -> lifetime count collected, for the Reports room's pinned Loot Drops row
+    farmTally: { lumber: 0, food: 0, water: 0, fuel: 0 }, // lifetime totals gathered from map hub tiles specifically
     resources: { lumber: 0, food: 0, water: 0, fuel: 0 },
     garageLevel: 1,
     researchLevel: 1,
@@ -1392,7 +1400,11 @@
     formationPresets: [null, null, null, null, null],
     settings: { autoOpenCamp: true, reduceMotion: false, notifyBuildDone: false, notifyRaided: false, soundEnabled: false },
     campLayout: {}, // room id -> {x,y} override, only set once a building's been dragged; falls back to CAMP_BUILDINGS' default spot
-    gear: { blade: 0, ward: 0, banner: 0 }, // highest tier crafted per gear type, 0 = not crafted yet
+    // Real, individually-owned crafted pieces: { id, type, tier, equippedBy }.
+    // A piece can only be equipped by ONE hero at a time -- getting a 2nd
+    // hero into the same gear type means crafting a genuinely separate copy,
+    // not sharing one account-wide tier (that's the old, replaced model).
+    gearInventory: [],
     relocateReadyAt: 0,
     eventPoints: 0,
     eventEndsAt: performance.now() + EVENT_DURATION_MS,
@@ -1436,6 +1448,7 @@
     if (!pool.length) return null;
     const item = pool[Math.floor(Math.random() * pool.length)];
     inventory[item] = (inventory[item] || 0) + 1;
+    state.lootTally[item] = (state.lootTally[item] || 0) + 1;
     return item;
   }
 
@@ -2030,34 +2043,65 @@
   }
   // moves lossPct of the SENT formation (proportionally per tier) into the
   // Hospital's wounded pool — same "fewer come home" idea as before, just
-  // driven by the outcome band instead of a flat one-in-three coin flip
-  // Of every loss taken attacking, most are wounded (recoverable at the
-  // Healer's Tent) but some are killed outright — permanently gone, no
-  // `.wounded` destination. Flat for now; research-based mitigation of the
-  // kill share is a deliberate later addition, not this pass.
+  // driven by the outcome band instead of a flat one-in-three coin flip.
+  // Of every loss taken, most are wounded (recoverable at the Healer's Tent)
+  // but some are killed outright — permanently gone, no `.wounded`
+  // destination. First Aid research reduces this base share. On top of
+  // that, the Hospital is a real CAPACITY, not a per-heal throughput limit
+  // (confirmed via Mafia City's own mechanic) — any wounded that would push
+  // the total past hospitalCapacity() die from overcrowding instead of
+  // recovering, exactly like the real game.
   const ATTACKER_KILL_SHARE = 0.4;
+  function effectiveKillShare() { return Math.max(0.05, ATTACKER_KILL_SHARE - researchBonusPct('first_aid')); }
+  // Returns a full per-troop-type breakdown (not just a total) so callers
+  // can build a real combat report instead of one summary line.
   function applyFormationLosses(formation, lossPct) {
-    let lost = 0;
+    let totalLost = 0;
+    const killed = {};
+    const wounded = {};
+    let capacityLeft = Math.max(0, hospitalCapacity() - totalWoundedTroops());
     TROOP_TYPES.forEach(t => {
       const sent = formation[t.key] || 0;
       if (sent <= 0) return;
       const hit = Math.round(sent * lossPct);
       if (hit <= 0) return;
-      const killed = Math.round(hit * ATTACKER_KILL_SHARE);
-      const wounded = hit - killed;
+      let killedCount = Math.round(hit * effectiveKillShare());
+      let woundedCount = hit - killedCount;
+      if (woundedCount > capacityLeft) {
+        const overflow = woundedCount - capacityLeft;
+        woundedCount -= overflow;
+        killedCount += overflow;
+        capacityLeft = 0;
+      } else {
+        capacityLeft -= woundedCount;
+      }
       formation[t.key] -= hit;
-      state.troopTypes[t.key].wounded += wounded;
-      lost += hit;
+      state.troopTypes[t.key].wounded += woundedCount;
+      totalLost += hit;
+      if (killedCount > 0) killed[t.key] = (killed[t.key] || 0) + killedCount;
+      if (woundedCount > 0) wounded[t.key] = (wounded[t.key] || 0) + woundedCount;
     });
-    return lost;
+    return { totalLost, killed, wounded };
+  }
+  // Turns a §5-style breakdown into readable "N Shieldbearer I wounded, M killed"
+  // lines for a report's expandable detail — shared by every combat report.
+  function formatLossDetail(losses) {
+    const lines = [];
+    TROOP_TYPES.forEach(t => {
+      const w = losses.wounded[t.key] || 0;
+      const k = losses.killed[t.key] || 0;
+      if (w > 0) lines.push(`${w} ${t.label} wounded`);
+      if (k > 0) lines.push(`${k} ${t.label} killed`);
+    });
+    return lines;
   }
   // for legacy call sites that just want "did this march take any losses" —
   // superseded by applyFormationLosses for anything that already knows its band
   function woundFormationTroops(formation) {
     const totalSent = formationTotal(formation);
     if (totalSent <= 0 || Math.random() > 0.35) return;
-    const lost = applyFormationLosses(formation, Math.min(0.4, (1 + Math.floor(Math.random() * 3)) / totalSent));
-    if (lost > 0) addLog(`${lost} troop${lost > 1 ? 's' : ''} lost on the march.`, 'lose', 'combat');
+    const losses = applyFormationLosses(formation, Math.min(0.4, (1 + Math.floor(Math.random() * 3)) / totalSent));
+    if (losses.totalLost > 0) addLog(`${losses.totalLost} troop${losses.totalLost > 1 ? 's' : ''} lost on the march.`, 'lose', 'combat', formatLossDetail(losses));
   }
   function critChance() {
     const driverPower = TROOP_TYPES.filter(t => t.role === 'driver').reduce((s, t) => s + state.troopTypes[t.key].active * t.tierMult, 0);
@@ -2083,7 +2127,7 @@
       flashTarget: null, flashUntil: 0, flashColor: null,
       formation: null, // troops currently deployed with this hero on a march, if any
       march: null, // timestamped travel/combat plan — see advanceMarch()
-      equippedGear: null, // null | 'blade' | 'ward' | 'banner' — only one at a time
+      equippedGearId: null, // id of one owned state.gearInventory piece, or null
     };
   }
 
@@ -2108,7 +2152,7 @@
     return {
       id: 'reinf' + (nextReinforcementId++), name: 'Reinforcements', isReinforcement: true,
       x: BASE.x, y: BASE.y, state: 'idle', walkPhase: 0,
-      stamina: 0, level: 1, equippedGear: null,
+      stamina: 0, level: 1, equippedGearId: null,
       formation: null, march: null, farmingHub: null,
       flashTarget: null, flashColor: null, flashUntil: 0,
       style: { outfit: '#5a5348', trim: '#8a8478', weapon: 'pistol' },
@@ -2137,7 +2181,7 @@
     return {
       id: 'scout' + (nextScoutId++), name: 'Scout', isReinforcement: true,
       x: BASE.x, y: BASE.y, state: 'idle', walkPhase: 0,
-      stamina: 0, level: 1, equippedGear: null,
+      stamina: 0, level: 1, equippedGearId: null,
       formation: {}, march: null, farmingHub: null,
       flashTarget: null, flashColor: null, flashUntil: 0,
       style: { outfit: '#6b6355', trim: '#a89f8c', weapon: 'knife' },
@@ -2207,6 +2251,10 @@
   }
 
   function recruitCost() { return 300 * heroes.length; }
+  // heroes.length is the CURRENT count — recruiting the next one (index
+  // heroes.length, 0-based) needs hero_recruitment researched to at least
+  // that level (recruiting hero #2 needs level 1, hero #3 needs level 2).
+  function heroRecruitUnlocked() { return heroes.length === 0 || researchCurrentLevel('hero_recruitment') >= heroes.length; }
 
   function barracksResourceCost() {
     const L = Math.pow(state.barracksLevel, RESOURCE_COST_EXPONENT);
@@ -2220,19 +2268,30 @@
     return { food: Math.round(18 * L), water: Math.round(12 * L) };
   }
 
-  // Hero gear, crafted at the Forge from syndicate drops (rollLoot() above
-  // hands out the raw materials) — one slot per hero, freely swappable
-  // between whichever's been crafted. Tiers scale the same way troop tiers
-  // do: each level costs more materials and grants a bigger flat bonus.
+  // Hero gear, crafted at the Forge from syndicate/Gate drops — each craft
+  // makes a real, separate, individually-tiered piece (state.gearInventory),
+  // equippable by exactly one hero at a time. Getting a 2nd hero the same
+  // TYPE of gear means crafting a genuinely separate copy, not sharing one
+  // account-wide tier — the old model let every hero equip the same shared
+  // tier at once, which wasn't the intent.
   const GEAR_TYPES = [
     { key: 'blade',  label: 'Blade of the Tribe',   materials: ['Torn Cloak', 'Bronze Knuckle-Guard'],                    bonusPerTier: 8,    desc: 'Attack',  source: 'Desert Marauders (claws)' },
-    { key: 'ward',   label: 'Ward of the Covenant', materials: ['Curved Dagger', "Camel Driver's Satchel"],               bonusPerTier: 0.06, desc: 'Losses', source: 'Midianite Host (blade)' },
+    { key: 'ward',   label: 'Ward of the Covenant', materials: ['Curved Dagger', "Camel Driver's Satchel"],               bonusPerTier: 0.06, desc: 'Losses', capacityPerTier: 500, source: 'Midianite Host (blade)' },
     { key: 'banner', label: 'Banner of Endurance',  materials: ['Iron-Tipped Club', 'Worn Tunic', 'Brass Signet Ring'],   bonusPerTier: 15,   desc: 'Stamina', source: 'Amalekite Raiders (fist) or Philistine Garrison (skull)' },
+    { key: 'gate',   label: 'Standard of the Gate', materials: ['Bronze City Seal', "Governor's Insignia"],               bonusPerTier: 5,    desc: 'Attack & Defense', source: 'Winning a Governor’s Gate seizure' },
   ];
-  function gearUpgradeCoinCost(gearKey) { return 200 * (state.gear[gearKey] + 1); }
-  function gearUpgradeMaterialCost(gearKey) {
-    const g = GEAR_TYPES.find(x => x.key === gearKey);
-    const need = state.gear[gearKey] + 1;
+  let nextGearId = 1;
+  function craftGear(type) {
+    const item = { id: nextGearId++, type, tier: 1, equippedBy: null };
+    state.gearInventory.push(item);
+    return item;
+  }
+  // Cost to take a piece from `tier` to `tier+1` — crafting a brand new
+  // piece is just this same curve starting from tier 0.
+  function gearUpgradeCoinCost(tier) { return 200 * (tier + 1); }
+  function gearUpgradeMaterialCost(type, tier) {
+    const g = GEAR_TYPES.find(x => x.key === type);
+    const need = tier + 1;
     const cost = {};
     g.materials.forEach(m => { cost[m] = need; });
     return cost;
@@ -2246,12 +2305,36 @@
   function fmtMaterialCost(cost) {
     return Object.entries(cost).map(([k, v]) => `${v} ${k}`).join(', ');
   }
-  // 0 unless this hero has this exact gear equipped — a hero with nothing
-  // equipped, or a different gear type equipped, gets no bonus from it
+  function heroEquippedGearItem(hero) {
+    if (!hero || hero.equippedGearId == null) return null;
+    return state.gearInventory.find(g => g.id === hero.equippedGearId) || null;
+  }
+  // 0 unless this hero has a piece of exactly this type equipped
   function heroGearBonus(hero, gearKey) {
-    if (!hero || hero.equippedGear !== gearKey) return 0;
+    const item = heroEquippedGearItem(hero);
+    if (!item || item.type !== gearKey) return 0;
     const g = GEAR_TYPES.find(x => x.key === gearKey);
-    return g.bonusPerTier * state.gear[gearKey];
+    return g.bonusPerTier * item.tier;
+  }
+  // Only EQUIPPED Ward pieces help the Hospital — one sitting uncrafted or
+  // unequipped in inventory doesn't do anything for it.
+  function wardCapacityBonus() {
+    return state.gearInventory.reduce((sum, item) => {
+      if (item.type !== 'ward' || item.equippedBy == null) return sum;
+      return sum + (GEAR_TYPES.find(g => g.key === 'ward').capacityPerTier || 0) * item.tier;
+    }, 0);
+  }
+  // 30%-base-chance drop, same shape as rollLoot()/rollTrialMaterial() — the
+  // Gate's own exclusive materials, since a currently-holding garrison's
+  // successful DEFENSE isn't visible to that player's client in real time,
+  // this only fires on winning a seizure.
+  function rollGateLoot() {
+    if (Math.random() > 0.3) return null;
+    const pool = GEAR_TYPES.find(g => g.key === 'gate').materials;
+    const item = pool[Math.floor(Math.random() * pool.length)];
+    inventory[item] = (inventory[item] || 0) + 1;
+    state.lootTally[item] = (state.lootTally[item] || 0) + 1;
+    return item;
   }
   // +2 max stamina per hero level — a hero's own level previously did
   // nothing for stamina at all (only Camp level/research/gear did), which
@@ -2263,9 +2346,13 @@
   }
   // Ward of the Covenant knocks a flat fraction off this hero's own losses —
   // this game's stand-in for a "health/defense boost," since troops (not
-  // heroes) are what actually gets wounded in a fight
+  // heroes) are what actually gets wounded in a fight. Hardened Ranks
+  // research (troop_defense) does the same job as a %, on top of Ward's
+  // flat amount — "troop toughness" in local fights specifically, since
+  // there's no NPC-attacks-you scenario for it to apply to on defense.
   function effectiveAttackerLossPct(hero, lossPct) {
-    return Math.max(0, lossPct - heroGearBonus(hero, 'ward'));
+    const afterWard = Math.max(0, lossPct - heroGearBonus(hero, 'ward'));
+    return Math.max(0, afterWard * (1 - researchBonusPct('troop_defense')));
   }
 
   // The Trial — an instant, no-march PvE ladder (modeled on Mafia City's
@@ -2300,16 +2387,18 @@
     const pool = trialStageGear(stage).materials;
     const item = pool[Math.floor(Math.random() * pool.length)];
     inventory[item] = (inventory[item] || 0) + 1;
+    state.lootTally[item] = (state.lootTally[item] || 0) + 1;
     return item;
   }
   function trialAttemptsRemaining() { return Math.max(0, TRIAL_DAILY_ATTEMPTS - state.trial.attemptsUsed); }
   function resolveTrialStage(formation, hero) {
     const stage = state.trial.stage;
     const power = trialStagePower(stage);
-    const ratio = (effectiveAttack(formation, trialStageComposition()) * heroSkillMultiplier(hero)) / power;
+    const ratio = (effectiveAttack(formation, trialStageComposition()) * heroSkillMultiplier(hero) * (1 + researchBonusPct('troop_attack'))) / power;
     const result = resolveCombatBand(ratio);
-    const lost = applyFormationLosses(formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
-    const lossTag = lost > 0 ? ` ${lost} lost.` : '';
+    const losses = applyFormationLosses(formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
+    const lossTag = losses.totalLost > 0 ? ` ${losses.totalLost} lost.` : '';
+    const detail = formatLossDetail(losses);
     if (result.won) {
       const reward = trialStageRewards(stage);
       state.coins += reward.silver;
@@ -2318,7 +2407,7 @@
       const mat = rollTrialMaterial(stage);
       const matTag = mat ? ` Found: ${mat}.` : '';
       const cleared = stage >= TRIAL_STAGES;
-      addLog(`Cleared Trial Stage ${stage} — ${reward.silver} silver, ${reward.resAmt} ${RESOURCE_LABELS[reward.resKey] || reward.resKey}.${matTag}${lossTag}`, 'win', 'combat');
+      addLog(`Cleared Trial Stage ${stage} — ${reward.silver} silver, ${reward.resAmt} ${RESOURCE_LABELS[reward.resKey] || reward.resKey}.${matTag}${lossTag}`, 'win', 'combat', detail);
       if (cleared) {
         addLog(`Cleared the whole Trial ladder! Starting back at Stage 1.`, 'win', 'combat');
         state.trial.stage = 1;
@@ -2328,7 +2417,7 @@
         state.trial.stage += 1;
       }
     } else {
-      addLog(`Lost at Trial Stage ${stage}.${lossTag} Run over — back to Stage 1.`, 'lose', 'combat');
+      addLog(`Lost at Trial Stage ${stage}.${lossTag} Run over — back to Stage 1.`, 'lose', 'combat', detail);
       state.trial.stage = 1;
       state.trial.attemptsUsed += 1;
       if (trialAttemptsRemaining() <= 0) state.trial.resetAt = performance.now() + TRIAL_RESET_MS;
@@ -2341,25 +2430,25 @@
 
   function hospitalResourceCost() { return { lumber: Math.round(15 * Math.pow(state.hospitalLevel, RESOURCE_COST_EXPONENT)) }; }
   function hospitalBuildMs() { return Math.round(180000 * Math.pow(state.hospitalLevel, 1.5) * (1 - researchBonusPct('build_speed'))); }
-  // Field Medicine research turns Camp growth into real heal capacity —
-  // earned through research investment (the multiplier is 0 until you've
-  // researched at least one level of it), scaled off Camp size rather than
-  // just inheriting the troop-training curve directly.
-  function healCapacityMult() { return 1 + researchBonusPct('heal_speed') * Math.sqrt(state.mansionLevel); }
-  function healBatchSize() { return Math.round(10 * state.hospitalLevel * healCapacityMult()); }
-  // batch defaults to the full earned capacity (unchanged behavior for
-  // anyone not touching the slider) — time and resource cost both scale
-  // proportionally with however many troops are actually chosen, so
-  // treating a small handful no longer costs the same multi-minute wait as
-  // a full batch.
+  // The real Hospital mechanic (confirmed via Mafia City's own guides): a
+  // CAPACITY, not a per-heal throughput limit. Wounded accumulate here for
+  // free; only once this cap is exceeded does the overflow die outright
+  // instead of recovering (see applyFormationLosses). Research and an
+  // equipped Ward of the Covenant both raise it.
+  function hospitalCapacity() {
+    const base = Math.round(1000 * Math.pow(state.hospitalLevel, 1.5));
+    return Math.round((base + wardCapacityBonus()) * (1 + researchBonusPct('hospital_capacity')));
+  }
+  // Reference batch size for TIME/COST scaling only — no longer a hard cap
+  // (a heal action can target the whole current wounded pool, however big).
+  function healScaleReference() { return Math.max(1, Math.round(10 * state.hospitalLevel * (1 + researchBonusPct('heal_speed') * Math.sqrt(state.mansionLevel)))); }
   function healFullBatchMs() { return Math.round(Math.max(90000, 240000 - state.hospitalLevel * 18000) * (1 - researchBonusPct('heal_speed'))); }
   function healMs(batch) {
-    const b = batch != null ? batch : healBatchSize();
-    const cap = healBatchSize();
-    return Math.max(5000, Math.round(healFullBatchMs() * (cap > 0 ? b / cap : 1)));
+    const b = batch != null ? batch : totalWoundedTroops();
+    return Math.max(5000, Math.round(healFullBatchMs() * (b / healScaleReference())));
   }
   function healResourceCost(batch) {
-    const b = batch != null ? batch : healBatchSize();
+    const b = batch != null ? batch : totalWoundedTroops();
     return { food: Math.round(b * 0.5) };
   }
 
@@ -2435,14 +2524,25 @@
     { key: 'researchLevel', label: "Scribes' Tent" },
   ];
   const RESEARCH_ITEMS = (() => {
+    // Categories reorganized to match Mafia City's own real investment
+    // categories (confirmed via its guides): Resources->Economy, Advance
+    // Arms->Arms (troop attack/training), Crew Capability->Crew (troop
+    // defense/HP, stamina, deployment/roster capacity), Turf Defence->
+    // Defense (home defense power, First Aid's kill->wounded mitigation),
+    // plus a new Hospital tree for wounded capacity specifically (Mafia
+    // City files this under its own building-investment line too).
     const projects = [
       { key: 'gather_speed',       category: 'Economy', label: 'Efficient Routes',   desc: 'Boosts how fast your crews gather from resource tiles.' },
       { key: 'warehouse_capacity', category: 'Economy', label: 'Reinforced Storage', desc: 'Raises how much of each resource the Warehouse can hold.' },
       { key: 'build_speed',        category: 'Economy', label: 'Rapid Construction', desc: 'Shortens build time for every room upgrade.' },
-      { key: 'stamina_max',        category: 'Hero',    label: 'Conditioning',       desc: 'Raises maximum stamina for every hero.' },
-      { key: 'heal_speed',         category: 'Hero',    label: 'Field Medicine',     desc: 'Shortens how long treating the wounded takes, and grows how many can be treated per batch (scales with Camp level).' },
-      { key: 'train_speed',        category: 'Hero',    label: 'Drill Instructors', desc: 'Shortens troop training time and grows each training batch.' },
+      { key: 'train_speed',        category: 'Arms',    label: 'Drill Instructors', desc: 'Shortens troop training time and grows each training batch.' },
+      { key: 'troop_attack',       category: 'Arms',    label: 'War Footing',       desc: 'Raises troop attack power in every local fight (syndicates, raids, the Trial).' },
+      { key: 'stamina_max',        category: 'Crew',    label: 'Conditioning',       desc: 'Raises maximum stamina for every hero.' },
+      { key: 'troop_defense',      category: 'Crew',    label: 'Hardened Ranks',    desc: 'Raises troop toughness in every local fight (syndicates, raids, the Trial).' },
       { key: 'fortification',      category: 'Defense', label: 'Fortification',     desc: 'Raises your home defense power against raids — a small buff at every level.' },
+      { key: 'first_aid',          category: 'Defense', label: 'First Aid',         desc: "Turns more of your own combat losses into wounded instead of killed outright." },
+      { key: 'heal_speed',         category: 'Hospital', label: 'Field Medicine',    desc: 'Shortens how long treating the wounded takes (scales with Camp level).' },
+      { key: 'hospital_capacity',  category: 'Hospital', label: 'Ward Expansion',    desc: 'Raises how many wounded the Hospital can hold before the overflow is lost.' },
     ];
     // Short at first, dramatically longer as the payoff grows: time scales
     // as level^1.5 (level 100 costs exactly 1000x level 1's time). Resource
@@ -2466,12 +2566,13 @@
     // is a real milestone (+1 whole deployment slot), not a small tick, so
     // the curve is steeper and the resource cost heavier than the projects
     // above. 7 levels takes maxConcurrentDeployments() from 3 (MAX_HEROES)
-    // to 10 at full investment. See extraSlots below, read by
-    // maxConcurrentDeployments() via researchCurrentLevel('logistics_corps').
+    // to 10 at full investment — extra slots beyond the base 3 heroes can
+    // only ever be filled heroless in practice (no 4th hero exists to send),
+    // but aren't reserved as heroless-only; they're just shared capacity.
     const LOGISTICS_MAX_LEVEL = 7;
     for (let level = 1; level <= LOGISTICS_MAX_LEVEL; level++) {
       list.push({
-        key: 'logistics_corps', category: 'Hero', label: 'Logistics Corps',
+        key: 'logistics_corps', category: 'Crew', label: 'Logistics Corps',
         desc: 'Lets you run one more deployment at a time without a hero leading it — troops alone, no personal attack bonus.',
         level, unlockLab: level * 12,
         bonusPct: 0,
@@ -2487,7 +2588,7 @@
     ADVANCED_MUSTER_LAB_LEVELS.forEach((labLevel, i) => {
       const level = i + 1;
       list.push({
-        key: 'advanced_muster', category: 'Hero', label: 'Advanced Muster',
+        key: 'advanced_muster', category: 'Crew', label: 'Advanced Muster',
         desc: `Unlocks Tier ${level + 1} troops (Camp level still required too).`,
         level, unlockLab: labLevel,
         bonusPct: 0,
@@ -2497,12 +2598,28 @@
     });
     // Wall Reinforcement: a single-level unlock for the 2nd Wall garrison slot.
     list.push({
-      key: 'wall_reinforcement', category: 'Hero', label: 'Wall Reinforcement',
+      key: 'wall_reinforcement', category: 'Defense', label: 'Wall Reinforcement',
       desc: 'Unlocks a 2nd Wall garrison slot, so a 2nd hero can help defend home.',
       level: 1, unlockLab: 15,
       bonusPct: 0,
       ms: Math.round(1800000 * Math.pow(1.5, 1.8)),
       resourceCost: { lumber: 300, food: 225, water: 150 },
+    });
+    // Hero Recruitment: a new Camp no longer starts with all 3 heroes
+    // available to recruit for silver alone — level 1 unlocks recruiting
+    // hero #2, level 2 unlocks hero #3. recruitCost() still charges silver
+    // on top, same combined research+cost gate as troop tiers.
+    const HERO_RECRUITMENT_LAB_LEVELS = [8, 25];
+    HERO_RECRUITMENT_LAB_LEVELS.forEach((labLevel, i) => {
+      const level = i + 1;
+      list.push({
+        key: 'hero_recruitment', category: 'Crew', label: 'Hero Recruitment',
+        desc: `Unlocks recruiting your ${level === 1 ? '2nd' : '3rd'} hero (silver cost still applies).`,
+        level, unlockLab: labLevel,
+        bonusPct: 0,
+        ms: Math.round(1800000 * Math.pow(level * 2, 1.8)),
+        resourceCost: { lumber: Math.round(400 * level), food: Math.round(300 * level), water: Math.round(200 * level) },
+      });
     });
     return list;
   })();
@@ -2557,7 +2674,7 @@
     const troopSum = TROOP_TYPES.reduce((sum, t) => sum + state.troopTypes[t.key].active * t.tierMult, 0);
     const fieldLevelSum = FIELD_TYPES.reduce((sum, f) => sum + state.resourceBuildings[f.key].reduce((s, l) => s + l, 0), 0);
     const fieldSiteLevelSum = FIELD_TYPES.reduce((sum, f) => sum + state.fieldLevels[f.key], 0);
-    const gearTierSum = GEAR_TYPES.reduce((sum, g) => sum + state.gear[g.key], 0);
+    const gearTierSum = state.gearInventory.reduce((sum, item) => sum + item.tier, 0);
     return Math.round(
       state.level * 20 +
       state.mansionLevel * 50 +
@@ -3698,7 +3815,7 @@
       }
     } else if (m.kind === 'raid') {
       const rb = ref;
-      const ratio = (effectiveAttack(m.formation, rivalComposition(rb)) * heroSkillMultiplier(hero)) / rivalPower(rb);
+      const ratio = (effectiveAttack(m.formation, rivalComposition(rb)) * heroSkillMultiplier(hero) * (1 + researchBonusPct('troop_attack'))) / rivalPower(rb);
       const result = resolveCombatBand(ratio);
       rb.flashColor = result.won ? '#c9a24b' : '#8c2f39';
       rb.flashUntil = performance.now() + 500;
@@ -3713,17 +3830,17 @@
         rb.defeatedUntil = performance.now() + rb.respawnMs;
         relocateRivalBase(rb);
         rb.scouted = false;
-        const lost = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
+        const losses = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
         const resTag = rb.resType !== 'gold' ? ` + ${rb.resAmt} ${rb.resType}` : '';
-        const lossTag = lost > 0 ? ` ${lost} lost in the fight.` : '';
+        const lossTag = losses.totalLost > 0 ? ` ${losses.totalLost} lost in the fight.` : '';
         const verb = result.band === 'decisive' ? 'Overran' : 'Raided';
-        addLog(`${verb} ${rb.name} — won ${cash} silver${resTag}.${lossTag} They've scattered — regrouping ${Math.round(rb.respawnMs/1000)}s somewhere new.`, 'win', 'combat');
+        addLog(`${verb} ${rb.name} — won ${cash} silver${resTag}.${lossTag} They've scattered — regrouping ${Math.round(rb.respawnMs/1000)}s somewhere new.`, 'win', 'combat', formatLossDetail(losses));
       } else {
-        const lost = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
-        addLog(`${hero.name} got run off ${rb.name}${lost > 0 ? ` — ${lost} lost` : ''}. No loot this time.`, 'lose', 'combat');
+        const losses = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
+        addLog(`${hero.name} got run off ${rb.name}${losses.totalLost > 0 ? ` — ${losses.totalLost} lost` : ''}. No loot this time.`, 'lose', 'combat', formatLossDetail(losses));
       }
     } else if (m.kind === 'seize') {
-      const ratio = (effectiveAttack(m.formation, GOVERNOR.composition) * heroSkillMultiplier(hero)) / GOVERNOR.power;
+      const ratio = (effectiveAttack(m.formation, GOVERNOR.composition) * heroSkillMultiplier(hero) * (1 + researchBonusPct('troop_attack'))) / GOVERNOR.power;
       const result = resolveCombatBand(ratio);
       GOVERNOR.flashColor = result.won ? '#c9a24b' : '#8c2f39';
       GOVERNOR.flashUntil = performance.now() + 600;
@@ -3732,11 +3849,11 @@
         state.governorHeld = true;
         gainXp(Math.round(GOVERNOR.power * 2));
         state.eventPoints += 5;
-        const lost = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
-        addLog(`${hero.name} seized the City Gate${lost > 0 ? ` — ${lost} lost taking it` : ''}. The city is yours until the next reset.`, 'win', 'combat');
+        const losses = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
+        addLog(`${hero.name} seized the City Gate${losses.totalLost > 0 ? ` — ${losses.totalLost} lost taking it` : ''}. The city is yours until the next reset.`, 'win', 'combat', formatLossDetail(losses));
       } else {
-        const lost = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
-        addLog(`${hero.name} couldn't take the City Gate${lost > 0 ? ` — ${lost} lost` : ''}. Try again once you're stronger.`, 'lose', 'combat');
+        const losses = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
+        addLog(`${hero.name} couldn't take the City Gate${losses.totalLost > 0 ? ` — ${losses.totalLost} lost` : ''}. Try again once you're stronger.`, 'lose', 'combat', formatLossDetail(losses));
       }
     } else if (m.kind === 'scout') {
       const target = ref;
@@ -3785,7 +3902,9 @@
     hero.state = 'captured';
     hero.march = null;
     hero.formation = null;
-    hero.equippedGear = null;
+    const item = heroEquippedGearItem(hero);
+    if (item) item.equippedBy = null; // the piece itself is safe, just needs re-equipping later
+    hero.equippedGearId = null;
     state.wallGarrison = state.wallGarrison.filter(id => id !== hero.id);
   }
 
@@ -3794,8 +3913,9 @@
     if (result.error) {
       addLog(`Raid failed: ${result.error}`, 'lose', 'combat');
     } else {
-      const lost = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct || 0));
-      const lossTag = lost > 0 ? ` ${lost} lost in the fight.` : '';
+      const losses = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct || 0));
+      const lossTag = losses.totalLost > 0 ? ` ${losses.totalLost} lost in the fight.` : '';
+      const detail = formatLossDetail(losses);
       if (result.won) {
         state.coins += result.coinReward;
         const stolen = result.stolen || {};
@@ -3809,13 +3929,13 @@
         const verb = result.band === 'decisive' ? 'Overran' : 'Raided';
         const captureTag = result.defenderHeroCaptured ? ` Captured ${result.defenderHeroCaptured.name} — held in your Prison.` : '';
         const freedTag = result.freedOwnCaptives ? ` (Also: beating them freed ${result.freedOwnCaptives} hostage${result.freedOwnCaptives > 1 ? 's' : ''} they were holding.)` : '';
-        addLog(`${verb} ${result.defenderName} — won ${result.coinReward} silver.${lossTag}${stolenTag}${captureTag}${freedTag}`, 'win', 'combat');
+        addLog(`${verb} ${result.defenderName} — won ${result.coinReward} silver.${lossTag}${stolenTag}${captureTag}${freedTag}`, 'win', 'combat', detail);
       } else {
         if (result.attackerHeroCaptured && hero) {
           markHeroCaptured(hero);
-          addLog(`${hero.name} was wiped out and captured by ${result.defenderName || 'the defender'} — check the Prison.`, 'lose', 'combat');
+          addLog(`${hero.name} was wiped out and captured by ${result.defenderName || 'the defender'} — check the Prison.`, 'lose', 'combat', detail);
         } else {
-          addLog(`${hero.name} got run off ${result.defenderName || 'their target'}.${lossTag} No loot this time.`, 'lose', 'combat');
+          addLog(`${hero.name} got run off ${result.defenderName || 'their target'}.${lossTag} No loot this time.`, 'lose', 'combat', detail);
         }
       }
     }
@@ -3831,8 +3951,9 @@
       addLog(`Someone else took the city at the same moment — try again.`, 'lose', 'combat');
       applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct || 0.2));
     } else {
-      const lost = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct || 0));
-      const lossTag = lost > 0 ? ` ${lost} lost taking it.` : '';
+      const losses = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct || 0));
+      const lossTag = losses.totalLost > 0 ? ` ${losses.totalLost} lost taking it.` : '';
+      const detail = formatLossDetail(losses);
       if (result.won) {
         // the hero AND the survivors stay stationed at the Gate — this is
         // what makes holding it a real commitment, not just a bigger number.
@@ -3844,7 +3965,9 @@
         hero.x = GOVERNOR.x; hero.y = GOVERNOR.y;
         hero.march = null;
         const captureTag = result.oldGarrisonHeroCaptured ? ` Captured ${result.oldGarrisonHeroCaptured.name}, the old garrison's hero — held in your Prison.` : '';
-        addLog(`${hero.name} seized the City Gate and is garrisoned there.${lossTag} The city is yours until someone takes it.${captureTag}`, 'win', 'combat');
+        const mat = rollGateLoot();
+        const matTag = mat ? ` Found: ${mat}.` : '';
+        addLog(`${hero.name} seized the City Gate and is garrisoned there.${lossTag} The city is yours until someone takes it.${captureTag}${matTag}`, 'win', 'combat', detail);
         gainXp(Math.round((result.cityPower || 60) * 2));
         state.eventPoints += 5;
         await mpPullCityControl();
@@ -3852,9 +3975,9 @@
         return;
       } else if (result.seizerHeroCaptured && hero) {
         markHeroCaptured(hero);
-        addLog(`${hero.name} was wiped out taking the City Gate and captured by its holder — check the Prison.`, 'lose', 'combat');
+        addLog(`${hero.name} was wiped out taking the City Gate and captured by its holder — check the Prison.`, 'lose', 'combat', detail);
       } else {
-        addLog(`${hero.name} couldn't take the City Gate.${lossTag} Try again once you're stronger.`, 'lose', 'combat');
+        addLog(`${hero.name} couldn't take the City Gate.${lossTag} Try again once you're stronger.`, 'lose', 'combat', detail);
       }
     }
     if (hero && hero.state === 'captured') { render(); return; }
@@ -5299,10 +5422,56 @@
   }
 
   // category: 'gathering' | 'combat' | 'building' | 'system' — drives the Reports room's tabs
-  function addLog(text, cls, category) {
-    reportLog.unshift({ text, cls, category: category || 'system' });
+  // detail: optional array of extra lines, hidden until the row is tapped —
+  // used for a real per-troop-type combat breakdown instead of one summary
+  // line (see applyFormationLosses/formatLossDetail).
+  function addLog(text, cls, category, detail) {
+    reportLog.unshift({ text, cls, category: category || 'system', detail: detail && detail.length ? detail : null });
     if (reportLog.length > 150) reportLog.length = 150;
     if (campView === 'reports') renderReportsRoom();
+  }
+
+  // Shared by normal report entries and the two pinned tally rows below —
+  // built with textContent throughout, not innerHTML, since report text can
+  // include other players' chosen display names, which must never be
+  // parsed as markup. Tapping a row with detail lines toggles them open.
+  function buildExpandableRow(text, cls, detail) {
+    const entry = document.createElement('div');
+    entry.className = 'log-entry' + (cls ? ' ' + cls : '');
+    const head = document.createElement('div');
+    head.textContent = text + (detail && detail.length ? ' (tap for details)' : '');
+    entry.appendChild(head);
+    if (detail && detail.length) {
+      entry.style.cursor = 'pointer';
+      const detailBox = document.createElement('div');
+      detailBox.className = 'log-entry-detail';
+      detailBox.style.display = 'none';
+      detail.forEach(line => {
+        const lineEl = document.createElement('div');
+        lineEl.textContent = line;
+        detailBox.appendChild(lineEl);
+      });
+      entry.appendChild(detailBox);
+      entry.addEventListener('click', () => { detailBox.style.display = detailBox.style.display === 'none' ? 'block' : 'none'; });
+    }
+    return entry;
+  }
+
+  // Pinned running-tally rows (Loot Drops, Resources Farmed) — lifetime
+  // totals the player can check any time, not one-off lines that scroll
+  // away, same expandable-row mechanism as a combat report.
+  function buildLootTallyRow() {
+    const items = Object.keys(state.lootTally).filter(k => state.lootTally[k] > 0);
+    const total = items.reduce((s, k) => s + state.lootTally[k], 0);
+    const detail = items.map(k => `${state.lootTally[k]} ${k}`);
+    return buildExpandableRow(`Loot Drops (${total} item${total === 1 ? '' : 's'} collected)`, 'system', detail);
+  }
+  function buildFarmTallyRow() {
+    const detail = Object.keys(state.farmTally)
+      .filter(k => state.farmTally[k] > 0)
+      .map(k => `${Math.round(state.farmTally[k])} ${RESOURCE_LABELS[k] || k}`);
+    const total = Object.values(state.farmTally).reduce((s, v) => s + v, 0);
+    return buildExpandableRow(`Resources Farmed (${Math.round(total)} lifetime)`, 'system', detail);
   }
 
   let activeReportTab = 'all';
@@ -5310,19 +5479,13 @@
     const list = document.getElementById('reportList');
     const entries = activeReportTab === 'all' ? reportLog : reportLog.filter(e => e.category === activeReportTab);
     list.innerHTML = '';
-    if (!entries.length) {
+    if (activeReportTab === 'all' || activeReportTab === 'gathering') list.appendChild(buildLootTallyRow());
+    if (activeReportTab === 'all' || activeReportTab === 'gathering') list.appendChild(buildFarmTallyRow());
+    if (!entries.length && list.children.length === 0) {
       list.innerHTML = '<div class="log-empty">No moves yet.</div>';
       return;
     }
-    // built with textContent, not innerHTML, on purpose — some report text
-    // includes other players' chosen display names, which must never be
-    // parsed as markup
-    entries.forEach(e => {
-      const entry = document.createElement('div');
-      entry.className = 'log-entry ' + e.cls;
-      entry.textContent = e.text;
-      list.appendChild(entry);
-    });
+    entries.forEach(e => list.appendChild(buildExpandableRow(e.text, e.cls, e.detail)));
   }
   document.getElementById('reportTabs').addEventListener('click', (e) => {
     const btn = e.target.closest('.report-tab');
@@ -5514,6 +5677,7 @@
     document.getElementById('recruitMeta').textContent = `Have ${heroes.length} of ${MAX_HEROES}.`;
     const recruitBtn = document.getElementById('recruitBtn');
     if (heroes.length >= MAX_HEROES) { recruitBtn.textContent = 'All recruited'; recruitBtn.disabled = true; }
+    else if (!heroRecruitUnlocked()) { recruitBtn.textContent = 'Requires Hero Recruitment research'; recruitBtn.disabled = true; }
     else { recruitBtn.textContent = `Recruit — ${recruitCost()} silver`; recruitBtn.disabled = state.coins < recruitCost(); }
 
     const barracksRes = barracksResourceCost();
@@ -5671,7 +5835,7 @@
   let healChosenBatch = null;
   function renderHospitalRoom() {
     document.getElementById('hospitalMeta').textContent =
-      `Level ${state.hospitalLevel} — heals ${healBatchSize()} wounded troops per batch.`;
+      `Level ${state.hospitalLevel} — holds up to ${hospitalCapacity()} wounded (${totalWoundedTroops()} right now). Past that cap, losses die instead of recovering.`;
     renderTimerRow('hospitalTimerRow', 'hospitalTimerFill', 'hospitalTimerLabel', 'hospital');
     renderTokenUseRow('hospital', 'hospitalTokenRow');
     const hospitalBtn = document.getElementById('hospitalBtn');
@@ -5701,7 +5865,7 @@
     const sliderRow = document.getElementById('healSliderRow');
     const countRow = document.getElementById('healCountRow');
     const wounded = totalWoundedTroops();
-    const healCap = Math.max(1, Math.min(wounded, healBatchSize()));
+    const healCap = Math.max(1, wounded);
     if (timers.heal || wounded <= 0) {
       sliderRow.style.display = 'none';
       countRow.style.display = 'none';
@@ -5945,7 +6109,7 @@
       labBtn.disabled = false;
     }
 
-    [['Economy', 'researchEconomyList'], ['Hero', 'researchHeroList'], ['Defense', 'researchDefenseList']].forEach(([category, listId]) => {
+    [['Economy', 'researchEconomyList'], ['Arms', 'researchArmsList'], ['Crew', 'researchCrewList'], ['Defense', 'researchDefenseList'], ['Hospital', 'researchHospitalList']].forEach(([category, listId]) => {
       const list = document.getElementById(listId);
       list.innerHTML = '';
       researchProjectKeys()
@@ -5965,6 +6129,8 @@
             : key === 'logistics_corps' ? `Level ${currentLevel} — ${currentLevel} extra deployment slot${currentLevel > 1 ? 's' : ''} (${maxConcurrentDeployments()} total)`
             : key === 'advanced_muster' ? `Level ${currentLevel} — Tier ${currentLevel + 1} troops unlocked (Camp level permitting)`
             : key === 'wall_reinforcement' ? `Researched — 2nd Wall slot unlocked`
+            : key === 'hero_recruitment' ? `Level ${currentLevel} — hero #${currentLevel + 1} recruitable`
+            : key === 'hospital_capacity' ? `Level ${currentLevel} — Hospital holds +${Math.round(researchBonusPct(key) * 100)}% more`
             : `Level ${currentLevel} (+${Math.round(researchBonusPct(key) * 100)}%)`;
           info.innerHTML = `
             <div class="item-name">${p.label}</div>
@@ -6029,49 +6195,86 @@
     });
   }
 
+  function gearBonusText(type, tier) {
+    const g = GEAR_TYPES.find(x => x.key === type);
+    return type === 'ward' ? `${g.desc} down ${Math.round(g.bonusPerTier * tier * 100)}%` : `+${Math.round(g.bonusPerTier * tier)} ${g.desc}`;
+  }
   function renderGearRoom() {
     const list = document.getElementById('gearList');
     if (!list) return;
     list.innerHTML = '';
     GEAR_TYPES.forEach(g => {
-      const tier = state.gear[g.key];
-      const maxed = tier >= 3;
-      const coinCost = gearUpgradeCoinCost(g.key);
-      const matCost = gearUpgradeMaterialCost(g.key);
-      const affordable = state.coins >= coinCost && hasMaterials(matCost);
+      const owned = state.gearInventory.filter(item => item.type === g.key);
+      const sourceText = g.key === 'gate' ? g.source : `Drops from ${g.source} (also scattered generic targets sharing that icon)`;
 
-      const card = document.createElement('div');
-      card.className = 'item-card';
-      const bonusText = tier > 0
-        ? (g.key === 'ward' ? `${g.desc} down ${Math.round(g.bonusPerTier * tier * 100)}%` : `+${Math.round(g.bonusPerTier * tier)} ${g.desc}`)
-        : 'Not crafted yet';
-      const info = document.createElement('div');
-      info.className = 'item-info';
-      info.innerHTML = `
-        <div class="item-name">${g.label}${tier > 0 ? ` — Tier ${tier}` : ''}</div>
-        <div class="item-meta">${bonusText}${maxed ? '' : `. Made from ${fmtMaterialCost(matCost)}`}.${maxed ? '' : ` Drops from ${g.source} (also scattered generic targets sharing that icon).`}</div>
+      const header = document.createElement('div');
+      header.className = 'item-name';
+      header.style.marginTop = '12px';
+      header.textContent = g.label;
+      list.appendChild(header);
+
+      owned.forEach(item => {
+        const maxed = item.tier >= 3;
+        const coinCost = gearUpgradeCoinCost(item.tier);
+        const matCost = gearUpgradeMaterialCost(g.key, item.tier);
+        const affordable = state.coins >= coinCost && hasMaterials(matCost);
+        const wornBy = item.equippedBy != null ? heroes.find(h => h.id === item.equippedBy) : null;
+
+        const card = document.createElement('div');
+        card.className = 'item-card';
+        const info = document.createElement('div');
+        info.className = 'item-info';
+        info.innerHTML = `
+          <div class="item-name">Tier ${item.tier}${wornBy ? ` — worn by ${wornBy.name}` : ' — unequipped'}</div>
+          <div class="item-meta">${gearBonusText(g.key, item.tier)}${maxed ? '' : `. Made from ${fmtMaterialCost(matCost)}`}.</div>
+        `;
+        card.appendChild(info);
+        const btn = document.createElement('button');
+        btn.className = 'gold-btn';
+        if (maxed) {
+          btn.textContent = 'Maxed';
+          btn.disabled = true;
+        } else {
+          btn.textContent = `Upgrade — ${coinCost} silver`;
+          btn.disabled = !affordable;
+          btn.addEventListener('click', () => {
+            if (state.coins < gearUpgradeCoinCost(item.tier) || !hasMaterials(gearUpgradeMaterialCost(g.key, item.tier))) return;
+            state.coins -= gearUpgradeCoinCost(item.tier);
+            spendMaterials(gearUpgradeMaterialCost(g.key, item.tier));
+            item.tier += 1;
+            addLog(`Upgraded a ${g.label} to Tier ${item.tier}.`, 'win', 'building');
+            render();
+          });
+        }
+        card.appendChild(btn);
+        list.appendChild(card);
+      });
+
+      const craftCost = gearUpgradeCoinCost(0);
+      const craftMatCost = gearUpgradeMaterialCost(g.key, 0);
+      const craftCard = document.createElement('div');
+      craftCard.className = 'item-card';
+      const craftInfo = document.createElement('div');
+      craftInfo.className = 'item-info';
+      craftInfo.innerHTML = `
+        <div class="item-name">Craft a new ${g.label}</div>
+        <div class="item-meta">A separate, independent piece — needed if you want a 2nd hero wearing this type at once. Made from ${fmtMaterialCost(craftMatCost)}. ${sourceText}.</div>
       `;
-      card.appendChild(info);
-
-      const btn = document.createElement('button');
-      btn.className = 'gold-btn';
-      if (maxed) {
-        btn.textContent = 'Maxed';
-        btn.disabled = true;
-      } else {
-        btn.textContent = `${tier > 0 ? 'Upgrade' : 'Craft'} — ${coinCost} silver`;
-        btn.disabled = !affordable;
-        btn.addEventListener('click', () => {
-          if (state.coins < gearUpgradeCoinCost(g.key) || !hasMaterials(gearUpgradeMaterialCost(g.key))) return;
-          state.coins -= gearUpgradeCoinCost(g.key);
-          spendMaterials(gearUpgradeMaterialCost(g.key));
-          state.gear[g.key] += 1;
-          addLog(`Crafted ${g.label} to Tier ${state.gear[g.key]}.`, 'win', 'building');
-          render();
-        });
-      }
-      card.appendChild(btn);
-      list.appendChild(card);
+      craftCard.appendChild(craftInfo);
+      const craftBtn = document.createElement('button');
+      craftBtn.className = 'gold-btn';
+      craftBtn.textContent = `Craft — ${craftCost} silver`;
+      craftBtn.disabled = state.coins < craftCost || !hasMaterials(craftMatCost);
+      craftBtn.addEventListener('click', () => {
+        if (state.coins < craftCost || !hasMaterials(craftMatCost)) return;
+        state.coins -= craftCost;
+        spendMaterials(craftMatCost);
+        craftGear(g.key);
+        addLog(`Crafted a new ${g.label}.`, 'win', 'building');
+        render();
+      });
+      craftCard.appendChild(craftBtn);
+      list.appendChild(craftCard);
     });
   }
 
@@ -6393,9 +6596,17 @@
       const resCost = heroUpgradeResourceCost(hero);
       const affordable = state.coins >= coinCost && hasResources(resCost);
 
-      const craftedGear = GEAR_TYPES.filter(g => state.gear[g.key] > 0);
+      // Each OWNED piece is its own option — one already worn by a DIFFERENT
+      // hero shows up disabled (a hard block, not hidden), so equipping the
+      // same TYPE on a 2nd hero requires either unequipping it from its
+      // current wearer first, or crafting a genuinely separate copy.
       const gearOptionsHtml = ['<option value="">No gear equipped</option>']
-        .concat(craftedGear.map(g => `<option value="${g.key}"${hero.equippedGear === g.key ? ' selected' : ''}>${g.label} (Tier ${state.gear[g.key]})</option>`))
+        .concat(state.gearInventory.map(item => {
+          const g = GEAR_TYPES.find(x => x.key === item.type);
+          const wornByOther = item.equippedBy != null && item.equippedBy !== hero.id;
+          const wornByOtherName = wornByOther ? (heroes.find(h => h.id === item.equippedBy) || {}).name : null;
+          return `<option value="${item.id}"${hero.equippedGearId === item.id ? ' selected' : ''}${wornByOther ? ' disabled' : ''}>${g.label} — Tier ${item.tier}${wornByOther ? ` (worn by ${wornByOtherName})` : ''}</option>`;
+        }))
         .join('');
 
       const card = document.createElement('div');
@@ -6409,10 +6620,19 @@
       `;
       const gearSelect = card.querySelector('.hero-gear-select');
       gearSelect.addEventListener('change', (e) => {
-        hero.equippedGear = e.target.value || null;
-        addLog(hero.equippedGear
-          ? `${hero.name} equipped ${GEAR_TYPES.find(g => g.key === hero.equippedGear).label}.`
-          : `${hero.name} unequipped their gear.`, 'win', 'building');
+        // clear whatever this hero was wearing before (an item can't be
+        // equipped by nobody-or-everybody, only ever by its actual wearer)
+        const previous = heroEquippedGearItem(hero);
+        if (previous) previous.equippedBy = null;
+        const newId = e.target.value ? Number(e.target.value) : null;
+        hero.equippedGearId = newId;
+        if (newId != null) {
+          const item = state.gearInventory.find(g => g.id === newId);
+          item.equippedBy = hero.id;
+          addLog(`${hero.name} equipped ${GEAR_TYPES.find(g => g.key === item.type).label} (Tier ${item.tier}).`, 'win', 'building');
+        } else {
+          addLog(`${hero.name} unequipped their gear.`, 'win', 'building');
+        }
         render();
       });
       // catches up on anything the skip-while-focused guard above deferred
@@ -6739,6 +6959,7 @@
 
   document.getElementById('recruitBtn').addEventListener('click', () => {
     if (heroes.length >= MAX_HEROES) return;
+    if (!heroRecruitUnlocked()) return;
     const cost = recruitCost();
     if (state.coins < cost) return;
     state.coins -= cost;
@@ -6821,7 +7042,7 @@
       return;
     }
     if (totalWoundedTroops() <= 0) return;
-    const batch = Math.max(1, Math.min(totalWoundedTroops(), healBatchSize(), healChosenBatch || healBatchSize()));
+    const batch = Math.max(1, Math.min(totalWoundedTroops(), healChosenBatch || totalWoundedTroops()));
     const healRes = healResourceCost(batch);
     if (!hasResources(healRes)) { showResourceShortfall(healRes); return; }
     spendResources(healRes);
@@ -6832,19 +7053,19 @@
 
   function setHealChosenBatch(value) {
     const wounded = totalWoundedTroops();
-    const cap = Math.max(1, Math.min(wounded, healBatchSize()));
+    const cap = Math.max(1, wounded);
     healChosenBatch = Math.max(1, Math.min(cap, value));
     renderHospitalRoom();
   }
   document.getElementById('healSlider').addEventListener('input', (e) => setHealChosenBatch(parseInt(e.target.value, 10) || 1));
   document.getElementById('healMinusBtn').addEventListener('click', () => {
-    setHealChosenBatch((healChosenBatch || 1) - Math.max(10, Math.round(healBatchSize() / 20)));
+    setHealChosenBatch((healChosenBatch || 1) - Math.max(10, Math.round(totalWoundedTroops() / 20)));
   });
   document.getElementById('healPlusBtn').addEventListener('click', () => {
-    setHealChosenBatch((healChosenBatch || 1) + Math.max(10, Math.round(healBatchSize() / 20)));
+    setHealChosenBatch((healChosenBatch || 1) + Math.max(10, Math.round(totalWoundedTroops() / 20)));
   });
   document.getElementById('healMaxBtn').addEventListener('click', () => {
-    setHealChosenBatch(Math.min(totalWoundedTroops(), healBatchSize()));
+    setHealChosenBatch(totalWoundedTroops());
   });
 
   document.getElementById('warehouseBtn').addEventListener('click', () => {
@@ -7034,7 +7255,10 @@
       if (amount <= 0) return;
       const key = hubResourceKey(h);
       if (key === 'gold') state.coins += amount;
-      else state.resources[key] = Math.min(cap, state.resources[key] + amount);
+      else {
+        state.resources[key] = Math.min(cap, state.resources[key] + amount);
+        state.farmTally[key] = (state.farmTally[key] || 0) + amount;
+      }
       h.reserve -= amount;
       changed = true;
       if (h.reserve <= 0) {
@@ -7270,7 +7494,6 @@
         resourceBuildings: JSON.parse(JSON.stringify(state.resourceBuildings)),
         fieldLevels: { ...state.fieldLevels },
         campLayout: JSON.parse(JSON.stringify(state.campLayout)),
-        gear: { ...state.gear },
         relocateRemainMs: msRemaining(state.relocateReadyAt),
         capacityBoostPct: state.capacityBoostPct,
         capacityBoostRemainMs: msRemaining(state.capacityBoostEndsAt),
@@ -7284,6 +7507,8 @@
         dailyRemainMs: msRemaining(state.dailyReadyAt),
         trial: { attemptsUsed: state.trial.attemptsUsed, stage: state.trial.stage, resetRemainMs: msRemaining(state.trial.resetAt) },
         wallGarrison: [...state.wallGarrison],
+        lootTally: { ...state.lootTally },
+        farmTally: { ...state.farmTally },
         resources: { ...state.resources },
         eventPoints: state.eventPoints,
         eventRemainMs: msRemaining(state.eventEndsAt),
@@ -7300,8 +7525,9 @@
         x: h.x, y: h.y,
         formation: h.formation ? { ...h.formation } : null,
         march: serializeMarch(h.march),
-        equippedGear: h.equippedGear,
+        equippedGearId: h.equippedGearId,
       })),
+      gearInventory: state.gearInventory.map(item => ({ ...item })),
       selectedId,
       // Logistics Corps reinforcement columns — same shape/reasoning as
       // heroes above, just without stamina/level/gear (none of those apply).
@@ -7363,11 +7589,31 @@
     } catch (e) { /* storage unavailable this session — game still works, just won't persist */ }
   }
 
+  // One-time migration for saves from before gear became real individual
+  // instances: synthesizes one piece per non-zero old shared tier, matching
+  // whichever hero (if any) had that TYPE equipped — so nobody's already-
+  // crafted gear just vanishes when this update lands.
+  function migrateGearForSave(save) {
+    if (save.gearInventory) return { inventory: save.gearInventory.map(item => ({ ...item })), heroGearIdByHeroId: null };
+    const oldGear = save.state.gear || {};
+    const inventory = [];
+    const heroGearIdByHeroId = {};
+    Object.keys(oldGear).forEach(type => {
+      const tier = oldGear[type];
+      if (!tier) return;
+      const id = nextGearId++;
+      const wearer = (save.heroes || []).find(sh => sh.equippedGear === type);
+      inventory.push({ id, type, tier, equippedBy: wearer ? wearer.id : null });
+      if (wearer) heroGearIdByHeroId[wearer.id] = id;
+    });
+    return { inventory, heroGearIdByHeroId };
+  }
   function applySavePayload(save) {
     // Date.now() (real wall-clock time) is what lets this span a closed
     // app/device — performance.now() resets to 0 on every fresh page load,
     // so it can't tell you how long you were actually gone.
     offlineElapsedMs = save.lastSaveEpochMs ? Math.max(0, Date.now() - save.lastSaveEpochMs) : 0;
+    const gearMigration = migrateGearForSave(save);
     Object.assign(state, {
       level: save.state.level, xp: save.state.xp, xpToLevel: save.state.xpToLevel,
       coins: save.state.coins, speedLevel: save.state.speedLevel,
@@ -7380,7 +7626,7 @@
       resourceBuildings: save.state.resourceBuildings || { lumber: [0, 0, 0], food: [0, 0, 0], water: [0, 0, 0] },
       fieldLevels: save.state.fieldLevels || { lumber: 1, food: 1, water: 1 },
       campLayout: save.state.campLayout || {},
-      gear: save.state.gear || { blade: 0, ward: 0, banner: 0 },
+      gearInventory: gearMigration.inventory,
       relocateReadyAt: performance.now() + catchUpMs(save.state.relocateRemainMs),
       capacityBoostPct: save.state.capacityBoostPct || 0,
       capacityBoostEndsAt: performance.now() + catchUpMs(save.state.capacityBoostRemainMs),
@@ -7396,6 +7642,8 @@
         ? { attemptsUsed: save.state.trial.attemptsUsed || 0, stage: save.state.trial.stage || 1, resetAt: performance.now() + catchUpMs(save.state.trial.resetRemainMs) }
         : { attemptsUsed: 0, stage: 1, resetAt: 0 },
       wallGarrison: save.state.wallGarrison || [],
+      lootTally: { ...(save.state.lootTally || {}) },
+      farmTally: { lumber: 0, food: 0, water: 0, fuel: 0, ...(save.state.farmTally || {}) },
       eventPoints: save.state.eventPoints,
       eventEndsAt: performance.now() + catchUpMs(save.state.eventRemainMs),
       governorHeld: !!save.state.governorHeld,
@@ -7457,7 +7705,8 @@
       h.state = sh.state;
       h.farmingHub = sh.farmingHub;
       h.x = sh.x; h.y = sh.y;
-      h.equippedGear = sh.equippedGear || null;
+      h.equippedGearId = sh.equippedGearId != null ? sh.equippedGearId
+        : (gearMigration.heroGearIdByHeroId ? (gearMigration.heroGearIdByHeroId[sh.id] || null) : null);
       h.march = deserializeMarch(sh.march);
       if (h.march) {
         // keep hero.formation and march.formation pointing at the same object —
@@ -7825,7 +8074,7 @@
       // Real hero identity/gear, synced for the first time — needed so a
       // captured hero (see Prison) has a real name/level to show, not just a
       // bare number. hero_levels above stays untouched, still used elsewhere.
-      heroes: heroes.map(h => ({ id: h.id, name: h.name, level: h.level, equippedGear: h.equippedGear })),
+      heroes: heroes.map(h => ({ id: h.id, name: h.name, level: h.level, equippedGear: heroEquippedGearItem(h)?.type || null })),
       wall_garrison: heroes.filter(h => state.wallGarrison.includes(h.id)).map(h => ({ id: h.id, name: h.name, level: h.level })),
       fortification_level: state.research.fortification || 0,
       troops: JSON.parse(JSON.stringify(state.troopTypes)),
