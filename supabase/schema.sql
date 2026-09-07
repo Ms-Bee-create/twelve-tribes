@@ -28,6 +28,11 @@ create table players (
   power integer not null default 0,
   mansion_level integer not null default 1,
   hero_levels jsonb not null default '[]'::jsonb,
+  -- real hero identity/gear (id/name/level/equippedGear) -- see migration_007
+  heroes jsonb not null default '[]'::jsonb,
+  -- which of those heroes are currently stationed on the Wall defending home
+  wall_garrison jsonb not null default '[]'::jsonb,
+  fortification_level integer not null default 0,
   troops jsonb not null default '{"enforcer":{"active":0,"wounded":0},"gunner":{"active":0,"wounded":0},"driver":{"active":0,"wounded":0}}'::jsonb,
   updated_at timestamptz not null default now()
 );
@@ -55,7 +60,11 @@ create table city_control (
   id integer primary key default 1 check (id = 1),
   held_by uuid references players(id) on delete set null,
   power integer not null default 60,
-  cycle_ends_at timestamptz not null default (now() + interval '8 minutes')
+  cycle_ends_at timestamptz not null default (now() + interval '8 minutes'),
+  -- real identity of the garrisoned hero (previously just a bare level
+  -- number) -- needed so a wiped garrison's hero can be captured
+  garrison_hero_id integer,
+  garrison_hero_name text
 );
 insert into city_control (id) values (1);
 
@@ -85,6 +94,61 @@ create policy "raid log is readable by the attacker or defender"
   to authenticated
   using (auth.uid() = attacker_id or auth.uid() = defender_id);
 -- no insert policy on purpose — only resolve-raid (service role) writes here
+
+-- One row per captured hero. A hero is never permanently lost: the owner
+-- can always eventually get them back (ransom, or once executed/timed out,
+-- a cheap local revive) — see pay-ransom and the Prison room.
+create table prisoners (
+  id bigint generated always as identity primary key,
+  hero_id integer not null,
+  hero_name text not null,
+  hero_level integer not null,
+  owner_id uuid not null references players(id) on delete cascade,
+  captor_id uuid not null references players(id) on delete cascade,
+  captured_at timestamptz not null default now(),
+  executed_at timestamptz
+);
+
+alter table prisoners enable row level security;
+
+create policy "a player can read prisoners they own or hold"
+  on prisoners for select
+  to authenticated
+  using (auth.uid() = owner_id or auth.uid() = captor_id);
+
+create policy "the captor can execute a prisoner they hold"
+  on prisoners for update
+  to authenticated
+  using (auth.uid() = captor_id)
+  with check (auth.uid() = captor_id);
+
+create policy "the owner can clear a resolved prisoner row"
+  on prisoners for delete
+  to authenticated
+  using (auth.uid() = owner_id and (executed_at is not null or captured_at < now() - interval '8 hours'));
+-- no insert policy on purpose — only resolve-raid/seize-governor (service role) create captures
+
+-- History of ransoms paid, so a captor can see "while you were away, X paid
+-- you a ransom" and credit their own local silver — silver itself never
+-- touches the server (see the header comment above), so this is a durable
+-- record the captor's own client applies locally, same pattern raid_log
+-- already uses for stolen troops.
+create table ransom_log (
+  id bigint generated always as identity primary key,
+  captor_id uuid not null references players(id) on delete cascade,
+  owner_id uuid not null references players(id) on delete cascade,
+  hero_name text not null,
+  silver integer not null,
+  created_at timestamptz not null default now()
+);
+
+alter table ransom_log enable row level security;
+
+create policy "a captor can read ransoms paid to them"
+  on ransom_log for select
+  to authenticated
+  using (auth.uid() = captor_id);
+-- no insert policy on purpose — only pay-ransom (service role) writes here
 
 -- shared chat — any signed-in player can read all of it, but can only ever
 -- insert a row as themselves. Delivered live via Supabase Realtime (see the

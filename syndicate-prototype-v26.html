@@ -586,6 +586,7 @@
   .room-body.theme-campfire { background: radial-gradient(ellipse at 50% 0%, rgba(178,58,70,0.14), rgba(15,12,9,0.85) 70%); }
   .room-body.theme-market { background: radial-gradient(ellipse at 50% 0%, rgba(201,162,75,0.16), rgba(15,12,9,0.85) 70%); }
   .room-body.theme-trial { background: radial-gradient(ellipse at 50% 0%, rgba(140,60,55,0.16), rgba(15,12,9,0.85) 70%); }
+  .room-body.theme-prison { background: radial-gradient(ellipse at 50% 0%, rgba(90,90,90,0.16), rgba(15,12,9,0.85) 70%); }
   .chat-panel { max-height: 340px; display: flex; flex-direction: column; gap: 2px; }
   .chat-message { padding: 6px 0; border-bottom: 1px solid var(--stone-line); }
   .chat-message:last-child { border-bottom: none; }
@@ -1203,6 +1204,14 @@
       </div>
     </div>
 
+    <div class="room-body theme-prison" id="room-prison" style="display:none">
+      <p class="room-intro">A hero is never permanently lost — captured just means held until ransomed, revived, or freed.</p>
+      <div class="item-name" style="margin-bottom:8px;">Held Captive by You</div>
+      <div id="prisonHoldingList"><div class="quest-progress">Nobody captive right now.</div></div>
+      <div class="item-name" style="margin: 16px 0 8px;">Your Captured Heroes</div>
+      <div id="prisonCapturedList"><div class="quest-progress">All of your heroes are free.</div></div>
+    </div>
+
     <div class="room-body theme-help" id="room-settings" style="display:none">
       <p class="room-intro">How the game looks, notifies you, and remembers who you are.</p>
 
@@ -1289,6 +1298,8 @@
       <div id="researchEconomyList"></div>
       <div class="item-name" style="margin: 16px 0 8px;">Hero</div>
       <div id="researchHeroList"></div>
+      <div class="item-name" style="margin: 16px 0 8px;">Defense</div>
+      <div id="researchDefenseList"></div>
     </div>
 
     <div class="room-body theme-armory" id="room-armory" style="display:none">
@@ -1352,6 +1363,7 @@
     // full clear). attemptsUsed/resetAt track the daily cap, same pattern as
     // dailyReadyAt above.
     trial: { attemptsUsed: 0, resetAt: 0, stage: 1 },
+    wallGarrison: [], // hero ids currently stationed defending home (see wallGarrisonCapacity())
     resources: { lumber: 0, food: 0, water: 0, fuel: 0 },
     garageLevel: 1,
     researchLevel: 1,
@@ -1883,22 +1895,26 @@
   ];
   const TROOP_TYPES = (() => {
     const tiers = [
-      { tier: 1, roman: 'I',   tierMult: 1.0, unlockBarracks: 1,  unlockMansion: 1 },
-      { tier: 2, roman: 'II',  tierMult: 2.0, unlockBarracks: 3,  unlockMansion: 3 },
-      { tier: 3, roman: 'III', tierMult: 3.5, unlockBarracks: 6,  unlockMansion: 6 },
-      { tier: 4, roman: 'IV',  tierMult: 5.0, unlockBarracks: 12, unlockMansion: 12 },
-      { tier: 5, roman: 'V',   tierMult: 7.0, unlockBarracks: 20, unlockMansion: 20 },
+      { tier: 1, roman: 'I',   tierMult: 1.0, unlockMansion: 1 },
+      { tier: 2, roman: 'II',  tierMult: 2.0, unlockMansion: 3 },
+      { tier: 3, roman: 'III', tierMult: 3.5, unlockMansion: 6 },
+      { tier: 4, roman: 'IV',  tierMult: 5.0, unlockMansion: 12 },
+      { tier: 5, roman: 'V',   tierMult: 7.0, unlockMansion: 20 },
     ];
     const list = [];
     TROOP_ROLES.forEach(r => tiers.forEach(t => list.push({
       key: r.role + t.tier, role: r.role, tier: t.tier, roman: t.roman,
       label: `${r.label} ${t.roman}`, row: r.row, desc: ROLE_DESC[r.role],
-      tierMult: t.tierMult, unlockBarracks: t.unlockBarracks, unlockMansion: t.unlockMansion,
+      tierMult: t.tierMult, unlockMansion: t.unlockMansion,
     })));
     return list;
   })();
+  // Matches Mafia City's real combined-gate pattern (confirmed via its own
+  // guides: high-tier troops need BOTH a Mansion level AND a separate
+  // facility/tech level) — Camp level alone, or research alone, isn't enough.
   function troopUnlocked(t) {
-    return state.barracksLevel >= t.unlockBarracks && state.mansionLevel >= t.unlockMansion;
+    if (t.tier === 1) return true;
+    return state.mansionLevel >= t.unlockMansion && researchCurrentLevel('advanced_muster') >= t.tier - 1;
   }
 
   function totalActiveTroops() {
@@ -2101,6 +2117,14 @@
   function activeDeploymentCount() { return heroes.filter(h => h.state !== 'idle').length + extraMarches.length; }
   function maxConcurrentDeployments() { return MAX_HEROES + (researchCurrentLevel('logistics_corps') || 0); }
   function canSendReinforcement() { return activeDeploymentCount() < maxConcurrentDeployments(); }
+
+  // The Wall — stationing a hero at home to defend, the same tradeoff as
+  // garrisoning the Governor's Gate (unavailable elsewhere while stationed).
+  // Fixes a real gap: without this, defense was pure troops vs. troops while
+  // an attacker always gets their hero's skill multiplier.
+  function wallGarrisonCapacity() { return researchCurrentLevel('wall_reinforcement') >= 1 ? 2 : 1; }
+  function wallGarrisonHeroes() { return heroes.filter(h => state.wallGarrison.includes(h.id)); }
+  function canGarrisonWall() { return wallGarrisonHeroes().length < wallGarrisonCapacity(); }
 
   // Scouting sends a hero-shaped walking dot out and back so it's visible on
   // the map, same as any other march — but it's kept in its own list,
@@ -2418,6 +2442,7 @@
       { key: 'stamina_max',        category: 'Hero',    label: 'Conditioning',       desc: 'Raises maximum stamina for every hero.' },
       { key: 'heal_speed',         category: 'Hero',    label: 'Field Medicine',     desc: 'Shortens how long treating the wounded takes, and grows how many can be treated per batch (scales with Camp level).' },
       { key: 'train_speed',        category: 'Hero',    label: 'Drill Instructors', desc: 'Shortens troop training time and grows each training batch.' },
+      { key: 'fortification',      category: 'Defense', label: 'Fortification',     desc: 'Raises your home defense power against raids — a small buff at every level.' },
     ];
     // Short at first, dramatically longer as the payoff grows: time scales
     // as level^1.5 (level 100 costs exactly 1000x level 1's time). Resource
@@ -2454,6 +2479,31 @@
         resourceCost: { lumber: Math.round(200 * level), food: Math.round(150 * level), water: Math.round(100 * level) },
       });
     }
+    // Advanced Muster: unlocks troop tiers 2-5 (tier 1 is always free), one
+    // level per tier, same discrete-milestone shape as Logistics Corps above.
+    // Camp level ALSO still gates each tier (see troopUnlocked()) — matches
+    // Mafia City's own combined building+tech gate for high-tier troops.
+    const ADVANCED_MUSTER_LAB_LEVELS = [3, 6, 12, 20];
+    ADVANCED_MUSTER_LAB_LEVELS.forEach((labLevel, i) => {
+      const level = i + 1;
+      list.push({
+        key: 'advanced_muster', category: 'Hero', label: 'Advanced Muster',
+        desc: `Unlocks Tier ${level + 1} troops (Camp level still required too).`,
+        level, unlockLab: labLevel,
+        bonusPct: 0,
+        ms: Math.round(1800000 * Math.pow(level, 1.8)),
+        resourceCost: { lumber: Math.round(200 * level), food: Math.round(150 * level), water: Math.round(100 * level) },
+      });
+    });
+    // Wall Reinforcement: a single-level unlock for the 2nd Wall garrison slot.
+    list.push({
+      key: 'wall_reinforcement', category: 'Hero', label: 'Wall Reinforcement',
+      desc: 'Unlocks a 2nd Wall garrison slot, so a 2nd hero can help defend home.',
+      level: 1, unlockLab: 15,
+      bonusPct: 0,
+      ms: Math.round(1800000 * Math.pow(1.5, 1.8)),
+      resourceCost: { lumber: 300, food: 225, water: 150 },
+    });
     return list;
   })();
   function researchProjectKeys() { return [...new Set(RESEARCH_ITEMS.map(r => r.key))]; }
@@ -2575,6 +2625,14 @@
   // undercut any real reason to fight for them.
   const GEAR_BUNDLE_PRICE = 3000;
   const GEAR_BUNDLE_COUNT = 2;
+
+  // The Prison — a hero is never permanently lost. Deliberately REAL time,
+  // not this file's usual demo-speed compression: losing a hero is a rare,
+  // meaningful event a real person needs real time to notice and react to.
+  const PRISON_RANSOM_SILVER = 10000; // paid to the captor
+  const PRISON_TIMEOUT_MS = 8 * 60 * 60 * 1000; // real 8 hours
+  const PRISON_REVIVE_SILVER = 200; // self-service, once executed/timed out
+  const CYANIDE_PILL_PRICE = 5000; // Store item: skip ransom AND the timeout entirely
 
   // ---- Resource-shortage guidance: when a build/train/research button is
   // blocked on resources, jump straight to the Store instead of silently
@@ -3717,8 +3775,22 @@
     }
   }
 
+  // A hero whose sent formation gets wiped in a real PvP fight is captured
+  // by the winner (see the Prison feature) — never permanently lost, just
+  // held until ransomed, revived after the real 8-hour window, or freed
+  // early with a Cyanide Pill. Clears march/formation defensively (should
+  // already be empty) and drops equipped gear, matching "you just have to
+  // equip your gear back."
+  function markHeroCaptured(hero) {
+    hero.state = 'captured';
+    hero.march = null;
+    hero.formation = null;
+    hero.equippedGear = null;
+    state.wallGarrison = state.wallGarrison.filter(id => id !== hero.id);
+  }
+
   async function resolvePvpRaidMarch(hero, m) {
-    const result = await mpCallEdgeFunction('resolve-raid', { defenderId: m.refName, formation: m.formation });
+    const result = await mpCallEdgeFunction('resolve-raid', { defenderId: m.refName, formation: m.formation, heroId: hero ? hero.id : null });
     if (result.error) {
       addLog(`Raid failed: ${result.error}`, 'lose', 'combat');
     } else {
@@ -3735,16 +3807,24 @@
           }
         });
         const verb = result.band === 'decisive' ? 'Overran' : 'Raided';
-        addLog(`${verb} ${result.defenderName} — won ${result.coinReward} silver.${lossTag}${stolenTag}`, 'win', 'combat');
+        const captureTag = result.defenderHeroCaptured ? ` Captured ${result.defenderHeroCaptured.name} — held in your Prison.` : '';
+        const freedTag = result.freedOwnCaptives ? ` (Also: beating them freed ${result.freedOwnCaptives} hostage${result.freedOwnCaptives > 1 ? 's' : ''} they were holding.)` : '';
+        addLog(`${verb} ${result.defenderName} — won ${result.coinReward} silver.${lossTag}${stolenTag}${captureTag}${freedTag}`, 'win', 'combat');
       } else {
-        addLog(`${hero.name} got run off ${result.defenderName || 'their target'}.${lossTag} No loot this time.`, 'lose', 'combat');
+        if (result.attackerHeroCaptured && hero) {
+          markHeroCaptured(hero);
+          addLog(`${hero.name} was wiped out and captured by ${result.defenderName || 'the defender'} — check the Prison.`, 'lose', 'combat');
+        } else {
+          addLog(`${hero.name} got run off ${result.defenderName || 'their target'}.${lossTag} No loot this time.`, 'lose', 'combat');
+        }
       }
     }
+    if (hero && hero.state === 'captured') { render(); return; }
     beginReturnLeg(hero, m, performance.now());
   }
 
   async function resolveSeizeMarchShared(hero, m) {
-    const result = await mpCallEdgeFunction('seize-governor', { formation: m.formation });
+    const result = await mpCallEdgeFunction('seize-governor', { formation: m.formation, heroId: hero ? hero.id : null });
     if (result.error) {
       addLog(`Couldn't seize the City Gate: ${result.error}`, 'lose', 'combat');
     } else if (result.contested) {
@@ -3763,16 +3843,21 @@
         hero.state = 'garrisoning';
         hero.x = GOVERNOR.x; hero.y = GOVERNOR.y;
         hero.march = null;
-        addLog(`${hero.name} seized the City Gate and is garrisoned there.${lossTag} The city is yours until someone takes it.`, 'win', 'combat');
+        const captureTag = result.oldGarrisonHeroCaptured ? ` Captured ${result.oldGarrisonHeroCaptured.name}, the old garrison's hero — held in your Prison.` : '';
+        addLog(`${hero.name} seized the City Gate and is garrisoned there.${lossTag} The city is yours until someone takes it.${captureTag}`, 'win', 'combat');
         gainXp(Math.round((result.cityPower || 60) * 2));
         state.eventPoints += 5;
         await mpPullCityControl();
         render();
         return;
+      } else if (result.seizerHeroCaptured && hero) {
+        markHeroCaptured(hero);
+        addLog(`${hero.name} was wiped out taking the City Gate and captured by its holder — check the Prison.`, 'lose', 'combat');
       } else {
         addLog(`${hero.name} couldn't take the City Gate.${lossTag} Try again once you're stronger.`, 'lose', 'combat');
       }
     }
+    if (hero && hero.state === 'captured') { render(); return; }
     beginReturnLeg(hero, m, performance.now());
   }
 
@@ -3890,7 +3975,7 @@
   }
 
   const mansionModal = document.getElementById('mansionModal');
-  const ROOM_IDS = ['foyer','barracks','armory','events','inventory','heroes','hospital','warehouse','garage','research','fieldlumber','fieldgrain','fieldwater','reports','help','campfire','market','settings','trial'];
+  const ROOM_IDS = ['foyer','barracks','armory','events','inventory','heroes','hospital','warehouse','garage','research','fieldlumber','fieldgrain','fieldwater','reports','help','campfire','market','settings','trial','prison'];
 
   // The Camp scene — a small fixed layout (logical 400x280 space, scaled to
   // fit the canvas) with one drawn structure per room. Tapping a structure
@@ -3915,6 +4000,7 @@
     { room: 'reports',     label: 'Watchtower',          icon: '🗼', x: 355, y: 325, w: 44, h: 34, roof: '#5a5348', body: '#3a352c' },
     { room: 'market',      label: 'The Market',          icon: '🛒', x: 45,  y: 110, w: 38, h: 24, roof: '#4a3f2a', body: '#2e2818' },
     { room: 'trial',       label: 'The Trial',           icon: '⚔️', x: 255, y: 110, w: 40, h: 26, roof: '#5a3f3a', body: '#3a2620' },
+    { room: 'prison',      label: 'The Prison',           icon: '⛓️', x: 150, y: 110, w: 40, h: 26, roof: '#3a3a3a', body: '#242020' },
   ];
   const CAMP_W = 400, CAMP_H = 370;
   const campCanvas = document.getElementById('campCanvas');
@@ -5477,6 +5563,7 @@
     FIELD_TYPES.forEach(renderFieldRoom);
     renderReportsRoom();
     renderTrialRoom();
+    renderPrisonRoom();
   }
 
   // Tier is the top-level tab here (opposite grouping from the deployment
@@ -5510,7 +5597,7 @@
     if (!troopUnlocked(activeRep)) {
       const hint = document.createElement('div');
       hint.className = 'quest-progress';
-      hint.textContent = `Tier ${activeRep.roman} unlocks at Muster ${activeRep.unlockBarracks} & Camp ${activeRep.unlockMansion} (you're at Muster ${state.barracksLevel}, Camp ${state.mansionLevel}).`;
+      hint.textContent = `Tier ${activeRep.roman} needs Camp ${activeRep.unlockMansion} and Advanced Muster research level ${activeRep.tier - 1} (you're at Camp ${state.mansionLevel}, Advanced Muster ${researchCurrentLevel('advanced_muster')}).`;
       list.appendChild(hint);
       return;
     }
@@ -5858,7 +5945,7 @@
       labBtn.disabled = false;
     }
 
-    [['Economy', 'researchEconomyList'], ['Hero', 'researchHeroList']].forEach(([category, listId]) => {
+    [['Economy', 'researchEconomyList'], ['Hero', 'researchHeroList'], ['Defense', 'researchDefenseList']].forEach(([category, listId]) => {
       const list = document.getElementById(listId);
       list.innerHTML = '';
       researchProjectKeys()
@@ -5876,6 +5963,8 @@
           info.className = 'item-info';
           const levelTag = currentLevel <= 0 ? 'Not researched yet'
             : key === 'logistics_corps' ? `Level ${currentLevel} — ${currentLevel} extra deployment slot${currentLevel > 1 ? 's' : ''} (${maxConcurrentDeployments()} total)`
+            : key === 'advanced_muster' ? `Level ${currentLevel} — Tier ${currentLevel + 1} troops unlocked (Camp level permitting)`
+            : key === 'wall_reinforcement' ? `Researched — 2nd Wall slot unlocked`
             : `Level ${currentLevel} (+${Math.round(researchBonusPct(key) * 100)}%)`;
           info.innerHTML = `
             <div class="item-name">${p.label}</div>
@@ -6182,6 +6271,23 @@
     gearCard.appendChild(gearBtn);
     convenienceList.appendChild(gearCard);
 
+    const pillCard = document.createElement('div');
+    pillCard.className = 'item-card';
+    pillCard.innerHTML = `<div class="item-info"><div class="item-name">Cyanide Pill</div><div class="item-meta">Have ${inventory['Cyanide Pill'] || 0}. Frees one of your OWN captured heroes immediately from the Prison room — no ransom, no waiting. Deliberately pricey.</div></div>`;
+    const pillBtn = document.createElement('button');
+    pillBtn.className = 'gold-btn';
+    pillBtn.textContent = `Buy — ${CYANIDE_PILL_PRICE} silver`;
+    pillBtn.disabled = state.coins < CYANIDE_PILL_PRICE;
+    pillBtn.addEventListener('click', () => {
+      if (state.coins < CYANIDE_PILL_PRICE) return;
+      state.coins -= CYANIDE_PILL_PRICE;
+      inventory['Cyanide Pill'] = (inventory['Cyanide Pill'] || 0) + 1;
+      addLog('Bought a Cyanide Pill.', 'win', 'building');
+      render();
+    });
+    pillCard.appendChild(pillBtn);
+    convenienceList.appendChild(pillCard);
+
     const RECALL_ORDER_PRICE = 250;
     const recallCard = document.createElement('div');
     recallCard.className = 'item-card';
@@ -6276,6 +6382,13 @@
     const list = document.getElementById('heroUpgradeList');
     list.innerHTML = '';
     heroes.forEach(hero => {
+      if (hero.state === 'captured') {
+        const card = document.createElement('div');
+        card.className = 'item-card';
+        card.innerHTML = `<div class="item-info"><div class="item-name" style="color:${hero.style.trim}">${hero.name} — Level ${hero.level}</div><div class="item-meta">Captured — see the Prison to ransom, revive, or use a Cyanide Pill.</div></div>`;
+        list.appendChild(card);
+        return;
+      }
       const coinCost = heroUpgradeCoinCost(hero);
       const resCost = heroUpgradeResourceCost(hero);
       const affordable = state.coins >= coinCost && hasResources(resCost);
@@ -6323,6 +6436,31 @@
         });
       }
       card.appendChild(btn);
+
+      const wallBtn = document.createElement('button');
+      wallBtn.className = 'gold-btn';
+      if (hero.state === 'wall') {
+        wallBtn.textContent = 'Recall from Wall';
+        wallBtn.addEventListener('click', () => {
+          hero.state = 'idle';
+          state.wallGarrison = state.wallGarrison.filter(id => id !== hero.id);
+          addLog(`${hero.name} stood down from the Wall.`, 'win', 'building');
+          render();
+        });
+      } else {
+        const canGarrison = hero.state === 'idle' && canGarrisonWall();
+        wallBtn.textContent = hero.state !== 'idle' ? 'Busy' : canGarrison ? 'Garrison to Wall' : `Wall full (${wallGarrisonCapacity()})`;
+        wallBtn.disabled = !canGarrison;
+        wallBtn.addEventListener('click', () => {
+          if (hero.state !== 'idle' || !canGarrisonWall()) return;
+          hero.state = 'wall';
+          state.wallGarrison.push(hero.id);
+          addLog(`${hero.name} took up position on the Wall, defending home.`, 'win', 'building');
+          render();
+        });
+      }
+      card.appendChild(wallBtn);
+
       list.appendChild(card);
     });
   }
@@ -6362,6 +6500,125 @@
           row.appendChild(btn);
         }
         lootList.appendChild(row);
+      });
+    }
+  }
+
+  // A prisoner row resolved (ransomed/revived/pilled) — bring the local hero
+  // home. Gear was already cleared at capture time (markHeroCaptured).
+  function restoreCapturedHero(heroId) {
+    const hero = heroes.find(h => h.id === heroId);
+    if (hero && hero.state === 'captured') hero.state = 'idle';
+  }
+
+  function renderPrisonRoom() {
+    const holdingList = document.getElementById('prisonHoldingList');
+    if (!prisonHolding.length) {
+      holdingList.innerHTML = '<div class="quest-progress">Nobody captive right now.</div>';
+    } else {
+      holdingList.innerHTML = '';
+      prisonHolding.forEach(row => {
+        const card = document.createElement('div');
+        card.className = 'item-card';
+        const executed = !!row.executed_at;
+        const info = document.createElement('div');
+        info.className = 'item-info';
+        info.innerHTML = `
+          <div class="item-name">${row.hero_name} — Level ${row.hero_level}</div>
+          <div class="item-meta">${executed ? 'Executed — waiting on them to revive.' : 'Captive — hoping for a ransom.'}</div>
+        `;
+        card.appendChild(info);
+        const btn = document.createElement('button');
+        btn.className = 'gold-btn';
+        btn.textContent = executed ? 'Executed' : 'Execute';
+        btn.disabled = executed;
+        if (!executed) {
+          btn.addEventListener('click', async () => {
+            const { error } = await sb.from('prisoners').update({ executed_at: new Date().toISOString() }).eq('id', row.id);
+            if (error) { addLog(`Couldn't execute: ${error.message}`, 'lose', 'combat'); render(); return; }
+            addLog(`Executed ${row.hero_name} — no ransom, just ends it.`, 'win', 'combat');
+            await mpPullPrisonData();
+            render();
+          });
+        }
+        card.appendChild(btn);
+        holdingList.appendChild(card);
+      });
+    }
+
+    const capturedList = document.getElementById('prisonCapturedList');
+    if (!prisonCaptured.length) {
+      capturedList.innerHTML = '<div class="quest-progress">All of your heroes are free.</div>';
+    } else {
+      capturedList.innerHTML = '';
+      prisonCaptured.forEach(row => {
+        const eligible = !!row.executed_at || (Date.now() - new Date(row.captured_at).getTime()) >= PRISON_TIMEOUT_MS;
+        const card = document.createElement('div');
+        card.className = 'item-card';
+        const info = document.createElement('div');
+        info.className = 'item-info';
+        const remainMs = Math.max(0, PRISON_TIMEOUT_MS - (Date.now() - new Date(row.captured_at).getTime()));
+        info.innerHTML = `
+          <div class="item-name">${row.hero_name} — Level ${row.hero_level}</div>
+          <div class="item-meta">${eligible ? 'Ready to revive — free their spot for 200 silver.' : `Captured — free in ${fmtSecs(remainMs)}, or pay ransom now.`}</div>
+        `;
+        card.appendChild(info);
+
+        const btnRow = document.createElement('div');
+        btnRow.style.display = 'flex';
+        btnRow.style.gap = '6px';
+
+        if (!eligible) {
+          const ransomBtn = document.createElement('button');
+          ransomBtn.className = 'gold-btn';
+          ransomBtn.textContent = `Pay Ransom — ${PRISON_RANSOM_SILVER}`;
+          ransomBtn.disabled = state.coins < PRISON_RANSOM_SILVER;
+          ransomBtn.addEventListener('click', async () => {
+            if (state.coins < PRISON_RANSOM_SILVER) return;
+            const result = await mpCallEdgeFunction('pay-ransom', { prisonerId: row.id, mode: 'ransom' });
+            if (result.error) { addLog(`Ransom failed: ${result.error}`, 'lose', 'combat'); render(); return; }
+            state.coins -= PRISON_RANSOM_SILVER;
+            restoreCapturedHero(result.heroId);
+            addLog(`Paid ${PRISON_RANSOM_SILVER} silver ransom — ${result.heroName} is home.`, 'win', 'combat');
+            await mpPullPrisonData();
+            render();
+          });
+          btnRow.appendChild(ransomBtn);
+
+          if ((inventory['Cyanide Pill'] || 0) > 0) {
+            const pillBtn = document.createElement('button');
+            pillBtn.className = 'gold-btn';
+            pillBtn.textContent = 'Use Cyanide Pill';
+            pillBtn.addEventListener('click', async () => {
+              const result = await mpCallEdgeFunction('pay-ransom', { prisonerId: row.id, mode: 'pill' });
+              if (result.error) { addLog(`Couldn't use the pill: ${result.error}`, 'lose', 'combat'); render(); return; }
+              inventory['Cyanide Pill'] -= 1;
+              restoreCapturedHero(result.heroId);
+              addLog(`Used a Cyanide Pill — ${result.heroName} is home immediately, no ransom paid.`, 'win', 'combat');
+              await mpPullPrisonData();
+              render();
+            });
+            btnRow.appendChild(pillBtn);
+          }
+        } else {
+          const reviveBtn = document.createElement('button');
+          reviveBtn.className = 'gold-btn';
+          reviveBtn.textContent = `Revive — ${PRISON_REVIVE_SILVER} silver`;
+          reviveBtn.disabled = state.coins < PRISON_REVIVE_SILVER;
+          reviveBtn.addEventListener('click', async () => {
+            if (state.coins < PRISON_REVIVE_SILVER) return;
+            const { error } = await sb.from('prisoners').delete().eq('id', row.id);
+            if (error) { addLog(`Couldn't revive: ${error.message}`, 'lose', 'combat'); render(); return; }
+            state.coins -= PRISON_REVIVE_SILVER;
+            restoreCapturedHero(row.hero_id);
+            addLog(`Revived ${row.hero_name} for ${PRISON_REVIVE_SILVER} silver — everything's the same, just re-equip their gear.`, 'win', 'combat');
+            await mpPullPrisonData();
+            render();
+          });
+          btnRow.appendChild(reviveBtn);
+        }
+        card.appendChild(btnRow);
+        capturedList.appendChild(card);
       });
     }
   }
@@ -7026,6 +7283,7 @@
         settings: { ...state.settings },
         dailyRemainMs: msRemaining(state.dailyReadyAt),
         trial: { attemptsUsed: state.trial.attemptsUsed, stage: state.trial.stage, resetRemainMs: msRemaining(state.trial.resetAt) },
+        wallGarrison: [...state.wallGarrison],
         resources: { ...state.resources },
         eventPoints: state.eventPoints,
         eventRemainMs: msRemaining(state.eventEndsAt),
@@ -7137,6 +7395,7 @@
       trial: save.state.trial
         ? { attemptsUsed: save.state.trial.attemptsUsed || 0, stage: save.state.trial.stage || 1, resetAt: performance.now() + catchUpMs(save.state.trial.resetRemainMs) }
         : { attemptsUsed: 0, stage: 1, resetAt: 0 },
+      wallGarrison: save.state.wallGarrison || [],
       eventPoints: save.state.eventPoints,
       eventEndsAt: performance.now() + catchUpMs(save.state.eventRemainMs),
       governorHeld: !!save.state.governorHeld,
@@ -7563,6 +7822,12 @@
       level: state.level, // account level — server needs this for heroSkillMultiplier
       mansion_level: state.mansionLevel, // so other players' maps can show/scale a real Camp, not a fixed generic icon
       hero_levels: heroes.map(h => h.level),
+      // Real hero identity/gear, synced for the first time — needed so a
+      // captured hero (see Prison) has a real name/level to show, not just a
+      // bare number. hero_levels above stays untouched, still used elsewhere.
+      heroes: heroes.map(h => ({ id: h.id, name: h.name, level: h.level, equippedGear: h.equippedGear })),
+      wall_garrison: heroes.filter(h => state.wallGarrison.includes(h.id)).map(h => ({ id: h.id, name: h.name, level: h.level })),
+      fortification_level: state.research.fortification || 0,
       troops: JSON.parse(JSON.stringify(state.troopTypes)),
       ...mpBuildMarchSnapshot(),
     };
@@ -7653,6 +7918,9 @@
   async function mpSyncTick() {
     await mpPullOtherPlayers();
     await mpCheckIncomingRaids();
+    await mpCheckIncomingCaptures();
+    await mpCheckRansomPayments();
+    await mpPullPrisonData();
     await mpPushProfile();
   }
   function mpStartSyncLoops() {
@@ -7784,6 +8052,69 @@
       });
       render();
     } catch (e) { /* try again on the next pull cycle */ }
+  }
+
+  // Discovers a hero captured on DEFENSE (a raid the client wasn't actively
+  // resolving — it happened inside someone ELSE's resolve-raid call) — the
+  // attacker-side capture case is already handled synchronously in
+  // resolvePvpRaidMarch/resolveSeizeMarchShared via markHeroCaptured(); this
+  // is the only way the defending side ever finds out. The hero's own
+  // state acts as the idempotency guard, same reasoning applies to
+  // avoiding a duplicate log line as a cursor would, without needing one.
+  async function mpCheckIncomingCaptures() {
+    if (!mpSession) return;
+    try {
+      const { data, error } = await sb.from('prisoners').select('*').eq('owner_id', mpSession.user.id).is('executed_at', null);
+      if (error || !data) return;
+      data.forEach(row => {
+        const hero = heroes.find(h => h.id === row.hero_id);
+        if (!hero || hero.state === 'captured') return;
+        markHeroCaptured(hero);
+        const captorName = (otherPlayers.find(p => p.id === row.captor_id) || {}).display_name || 'a rival player';
+        addLog(`While you were away: ${hero.name} was captured by ${captorName} — check the Prison.`, 'lose', 'combat');
+        if (state.settings.notifyRaided) fireNotification('Twelve Tribes', `${hero.name} was captured!`);
+      });
+      render();
+    } catch (e) { /* try again next cycle */ }
+  }
+
+  // Ransom silver never touches the server (see schema.sql) — a captor
+  // learns they got paid by checking ransom_log, same "catch up on what
+  // happened while away" pattern mpCheckIncomingRaids() uses for stolen troops.
+  const MP_SEEN_RANSOM_KEY = 'syndicate-mp-last-seen-ransom';
+  async function mpCheckRansomPayments() {
+    if (!mpSession) return;
+    try {
+      const lastSeen = Number(localStorage.getItem(MP_SEEN_RANSOM_KEY) || 0);
+      const { data, error } = await sb.from('ransom_log')
+        .select('*')
+        .eq('captor_id', mpSession.user.id)
+        .gt('id', lastSeen)
+        .order('id', { ascending: true });
+      if (error || !data || !data.length) return;
+      data.forEach(row => {
+        state.coins += row.silver;
+        addLog(`Ransom paid: +${row.silver} silver for ${row.hero_name}.`, 'win', 'combat');
+        localStorage.setItem(MP_SEEN_RANSOM_KEY, String(row.id));
+      });
+      render();
+    } catch (e) { /* try again next cycle */ }
+  }
+
+  // Cached lists the Prison room renders from synchronously — refreshed on
+  // the normal 25s sync tick and whenever the room is actually open.
+  let prisonHolding = []; // captives I'm holding (I'm captor_id)
+  let prisonCaptured = []; // my own heroes captured elsewhere (I'm owner_id)
+  async function mpPullPrisonData() {
+    if (!mpSession) return;
+    try {
+      const [{ data: holding }, { data: captured }] = await Promise.all([
+        sb.from('prisoners').select('*').eq('captor_id', mpSession.user.id),
+        sb.from('prisoners').select('*').eq('owner_id', mpSession.user.id),
+      ]);
+      if (holding) prisonHolding = holding;
+      if (captured) prisonCaptured = captured;
+    } catch (e) { /* keep showing the last-known lists */ }
   }
 
   // interpolates the same way advanceMarch does for a local hero, just off

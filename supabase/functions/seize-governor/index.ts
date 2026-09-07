@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
     const { data: { user }, error: userErr } = await callerClient.auth.getUser();
     if (userErr || !user) return json({ error: "Not signed in." }, 401);
 
-    const { formation } = await req.json();
+    const { formation, heroId } = await req.json();
     if (!formation) return json({ error: "Missing formation." }, 400);
 
     const sentTotal = TROOP_TYPES.reduce((sum, t) => sum + (formation[t.key] || 0), 0);
@@ -89,11 +89,27 @@ Deno.serve(async (req) => {
     const ratio = defensePower > 0 ? attackPower / defensePower : (attackPower > 0 ? 99 : 0);
     const result = resolveCombatBand(ratio);
 
+    let oldGarrisonHeroCaptured: { id: number; name: string; level: number } | null = null;
+    let seizerHeroCaptured: { id: number; name: string; level: number } | null = null;
+
     if (result.won) {
       // the old garrison (if any) takes the defender-loss share — it's being
       // fully replaced either way, this is just for an honest power number
       // in the response and isn't written anywhere the old holder can see
       if (garrison) applyDefenderLosses(garrison, result.defenderLossPct);
+
+      // if the old garrison was wiped to zero, its hero is captured by the
+      // seizer — same "total defeat" rule as regular raiding
+      if (garrison && city.garrison_hero_id) {
+        const oldGarrisonSurvived = TROOP_TYPES.reduce((sum, t) => sum + (garrison[t.key]?.active || 0), 0);
+        if (oldGarrisonSurvived <= 0) {
+          await admin.from("prisoners").insert({
+            hero_id: city.garrison_hero_id, hero_name: city.garrison_hero_name, hero_level: city.garrison_hero_level || 1,
+            owner_id: city.held_by, captor_id: user.id,
+          });
+          oldGarrisonHeroCaptured = { id: city.garrison_hero_id, name: city.garrison_hero_name, level: city.garrison_hero_level || 1 };
+        }
+      }
 
       // the attacker's SURVIVING formation becomes the new garrison
       const newGarrison: Record<string, { active: number; wounded: number }> = {};
@@ -104,6 +120,8 @@ Deno.serve(async (req) => {
         if (survived > 0) newGarrison[t.key] = { active: survived, wounded: 0 };
       });
 
+      const heroSnapshot = heroId != null ? (attacker.heroes || []).find((h: { id: number }) => h.id === heroId) : null;
+
       // optimistic check — someone else may have just taken it. SQL `=` never
       // matches NULL, so an unheld city (held_by IS NULL) needs `.is()`, not `.eq()`.
       let query = admin.from("city_control")
@@ -113,6 +131,8 @@ Deno.serve(async (req) => {
           garrison: newGarrison,
           garrison_hero_level: heroLevel,
           garrison_account_level: attacker.level || 1,
+          garrison_hero_id: heroSnapshot ? heroSnapshot.id : null,
+          garrison_hero_name: heroSnapshot ? heroSnapshot.name : null,
           cycle_ends_at: new Date(Date.now() + GOVERNOR_CYCLE_MS).toISOString(),
         })
         .eq("id", 1);
@@ -121,6 +141,24 @@ Deno.serve(async (req) => {
       if (!updated) {
         return json({ won: false, contested: true, attackerLossPct: result.attackerLossPct, cityPower: Math.round(defensePower) });
       }
+    } else if (heroId != null && city.held_by) {
+      // the seizer lost — if their OWN sent formation was wiped, the current
+      // holder captures the seizer's hero
+      const survived = TROOP_TYPES.reduce((sum, t) => {
+        const sent = formation[t.key] || 0;
+        if (sent <= 0) return sum;
+        return sum + (sent - Math.round(sent * result.attackerLossPct));
+      }, 0);
+      if (survived <= 0) {
+        const heroSnapshot = (attacker.heroes || []).find((h: { id: number }) => h.id === heroId);
+        if (heroSnapshot) {
+          await admin.from("prisoners").insert({
+            hero_id: heroSnapshot.id, hero_name: heroSnapshot.name, hero_level: heroSnapshot.level,
+            owner_id: user.id, captor_id: city.held_by,
+          });
+          seizerHeroCaptured = heroSnapshot;
+        }
+      }
     }
 
     return json({
@@ -128,6 +166,8 @@ Deno.serve(async (req) => {
       band: result.band,
       attackerLossPct: result.attackerLossPct,
       cityPower: Math.round(defensePower),
+      oldGarrisonHeroCaptured,
+      seizerHeroCaptured,
     });
   } catch (e) {
     console.error(e);
