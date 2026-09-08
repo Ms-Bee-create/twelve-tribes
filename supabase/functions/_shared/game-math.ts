@@ -60,8 +60,17 @@ export function effectiveDefense(troops: TroopsObj): number {
   return TROOP_TYPES.reduce((sum, t) => sum + (troops[t.key]?.active ?? 0) * t.tierMult * ROLE_DEFENSE[t.role], 0);
 }
 
+// Must mirror the game file's own MAX_LEVEL=100 cap on both inputs (see its
+// heroSkillMultiplier) -- account level in particular has NO ceiling in
+// normal XP progression, so any long-lived real account will eventually
+// exceed 100 through ordinary honest play, not just a forged value. Without
+// this cap the server's real combat resolution would silently diverge from
+// what the client's own (capped) odds preview showed that same player.
+const MAX_LEVEL = 100;
 export function heroSkillMultiplier(heroLevel: number, accountLevel: number): number {
-  return 1 + (heroLevel - 1) * 0.05 + (accountLevel - 1) * 0.02;
+  const heroLvl = Math.min(MAX_LEVEL, heroLevel);
+  const acctLvl = Math.min(MAX_LEVEL, accountLevel);
+  return 1 + (heroLvl - 1) * 0.05 + (acctLvl - 1) * 0.02;
 }
 
 export type CombatBand = "decisive" | "solid" | "costly" | "clear";

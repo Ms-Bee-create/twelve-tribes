@@ -7815,6 +7815,16 @@
       }
       extraMarches.push(r);
     });
+    // makeReinforcement() above already minted+discarded an id per restored
+    // entry, so the counter only reflects COUNT restored, not the highest id
+    // actually in use -- e.g. a since-returned reinf1 dropping out of the
+    // save while reinf3 is still in flight would let the next real dispatch
+    // mint a colliding 'reinf' + nextReinforcementId. Same bug class as the
+    // gear-id fix above (applies to nextScoutId below too).
+    extraMarches.forEach(r => {
+      const n = parseInt(String(r.id).replace('reinf', ''), 10);
+      if (!isNaN(n) && n >= nextReinforcementId) nextReinforcementId = n + 1;
+    });
 
     scoutMarches.length = 0;
     (save.scoutMarches || []).forEach(sr => {
@@ -7824,6 +7834,10 @@
       r.x = sr.x; r.y = sr.y;
       r.march = deserializeMarch(sr.march);
       scoutMarches.push(r);
+    });
+    scoutMarches.forEach(r => {
+      const n = parseInt(String(r.id).replace('scout', ''), 10);
+      if (!isNaN(n) && n >= nextScoutId) nextScoutId = n + 1;
     });
 
     save.targets.forEach(st => {
