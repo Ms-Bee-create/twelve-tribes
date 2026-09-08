@@ -5485,7 +5485,7 @@
   // used for a real per-troop-type combat breakdown instead of one summary
   // line (see applyFormationLosses/formatLossDetail).
   function addLog(text, cls, category, detail) {
-    reportLog.unshift({ text, cls, category: category || 'system', detail: detail && detail.length ? detail : null });
+    reportLog.unshift({ text, cls, category: category || 'system', detail: detail && detail.length ? detail : null, open: false });
     if (reportLog.length > 150) reportLog.length = 150;
     if (campView === 'reports') renderReportsRoom();
   }
@@ -5494,7 +5494,16 @@
   // built with textContent throughout, not innerHTML, since report text can
   // include other players' chosen display names, which must never be
   // parsed as markup. Tapping a row with detail lines toggles them open.
-  function buildExpandableRow(text, cls, detail) {
+  // `openState` is any object with a mutable `.open` boolean that OUTLIVES
+  // this call — renderMansionRooms() calls renderReportsRoom() on every
+  // passive tick (resource gathering alone ticks every 1s) regardless of
+  // which Camp room is actually showing, so the list gets a fresh
+  // innerHTML='' rebuild constantly while the Reports room is open. Without
+  // persisting the open/closed flag somewhere that survives the rebuild, a
+  // tapped-open detail box snapped back closed within about a second of
+  // being opened — same root cause as the earlier gear-picker-torn-down-
+  // mid-interaction bug, just on this room instead.
+  function buildExpandableRow(text, cls, detail, openState) {
     const entry = document.createElement('div');
     entry.className = 'log-entry' + (cls ? ' ' + cls : '');
     const head = document.createElement('div');
@@ -5504,33 +5513,41 @@
       entry.style.cursor = 'pointer';
       const detailBox = document.createElement('div');
       detailBox.className = 'log-entry-detail';
-      detailBox.style.display = 'none';
+      detailBox.style.display = (openState && openState.open) ? 'block' : 'none';
       detail.forEach(line => {
         const lineEl = document.createElement('div');
         lineEl.textContent = line;
         detailBox.appendChild(lineEl);
       });
       entry.appendChild(detailBox);
-      entry.addEventListener('click', () => { detailBox.style.display = detailBox.style.display === 'none' ? 'block' : 'none'; });
+      entry.addEventListener('click', () => {
+        const nowOpen = detailBox.style.display === 'none';
+        detailBox.style.display = nowOpen ? 'block' : 'none';
+        if (openState) openState.open = nowOpen;
+      });
     }
     return entry;
   }
 
   // Pinned running-tally rows (Loot Drops, Resources Farmed) — lifetime
   // totals the player can check any time, not one-off lines that scroll
-  // away, same expandable-row mechanism as a combat report.
+  // away, same expandable-row mechanism as a combat report. Each gets its
+  // own persistent open-state object since neither is backed by a stable
+  // reportLog entry the way a real report row is.
+  const lootTallyOpenState = { open: false };
+  const farmTallyOpenState = { open: false };
   function buildLootTallyRow() {
     const items = Object.keys(state.lootTally).filter(k => state.lootTally[k] > 0);
     const total = items.reduce((s, k) => s + state.lootTally[k], 0);
     const detail = items.map(k => `${state.lootTally[k]} ${k}`);
-    return buildExpandableRow(`Loot Drops (${total} item${total === 1 ? '' : 's'} collected)`, 'system', detail);
+    return buildExpandableRow(`Loot Drops (${total} item${total === 1 ? '' : 's'} collected)`, 'system', detail, lootTallyOpenState);
   }
   function buildFarmTallyRow() {
     const detail = Object.keys(state.farmTally)
       .filter(k => state.farmTally[k] > 0)
       .map(k => `${Math.round(state.farmTally[k])} ${RESOURCE_LABELS[k] || k}`);
     const total = Object.values(state.farmTally).reduce((s, v) => s + v, 0);
-    return buildExpandableRow(`Resources Farmed (${Math.round(total)} lifetime)`, 'system', detail);
+    return buildExpandableRow(`Resources Farmed (${Math.round(total)} lifetime)`, 'system', detail, farmTallyOpenState);
   }
 
   let activeReportTab = 'all';
@@ -5544,7 +5561,7 @@
       list.innerHTML = '<div class="log-empty">No moves yet.</div>';
       return;
     }
-    entries.forEach(e => list.appendChild(buildExpandableRow(e.text, e.cls, e.detail)));
+    entries.forEach(e => list.appendChild(buildExpandableRow(e.text, e.cls, e.detail, e)));
   }
   document.getElementById('reportTabs').addEventListener('click', (e) => {
     const btn = e.target.closest('.report-tab');
