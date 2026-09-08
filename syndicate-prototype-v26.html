@@ -814,6 +814,7 @@
         <span class="mansion-coins" id="mansionCoinsBadge">💰 100</span>
       </div>
       <button class="modal-close" id="rearrangeBtn" style="display:none">Rearrange</button>
+      <button class="modal-close" id="exitToMapBtn" style="display:none">Exit to Map</button>
       <button class="modal-close" id="closeModal">← Back to Map</button>
     </div>
 
@@ -2106,6 +2107,24 @@
     });
     return lines;
   }
+  function formatFormationLines(formation) {
+    return TROOP_TYPES.filter(t => (formation[t.key] || 0) > 0).map(t => `${formation[t.key]} ${t.label}`);
+  }
+  // Full expandable battle report: what was sent, the resolved outcome
+  // band (+ ratio when it's known locally — real PvP doesn't return a
+  // numeric ratio today, only the band), then the existing per-troop-type
+  // loss breakdown. Matches real games' "Battle Details" — composition +
+  // outcome + losses, not just a loss summary.
+  const BAND_LABELS = { decisive: 'Decisive win', solid: 'Solid win', costly: 'Costly loss', clear: 'Clear loss' };
+  function buildBattleDetail(sent, losses, bandKey, ratio) {
+    const lines = [];
+    const sentLines = formatFormationLines(sent);
+    if (sentLines.length) lines.push(`Sent: ${sentLines.join(', ')}`);
+    if (bandKey) lines.push(`Result: ${BAND_LABELS[bandKey] || bandKey}${ratio != null ? ` (${ratio.toFixed(2)}x)` : ''}`);
+    const lossLines = formatLossDetail(losses);
+    lines.push(...(lossLines.length ? lossLines : ['No losses.']));
+    return lines;
+  }
   // for legacy call sites that just want "did this march take any losses" —
   // superseded by applyFormationLosses for anything that already knows its band
   function woundFormationTroops(formation) {
@@ -2407,9 +2426,10 @@
     const power = trialStagePower(stage);
     const ratio = (effectiveAttack(formation, trialStageComposition()) * heroSkillMultiplier(hero) * (1 + researchBonusPct('troop_attack'))) / power;
     const result = resolveCombatBand(ratio);
+    const sentSnapshot = { ...formation }; // applyFormationLosses mutates `formation` in place -- snapshot what was ACTUALLY sent first
     const losses = applyFormationLosses(formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
     const lossTag = losses.totalLost > 0 ? ` ${losses.totalLost} lost.` : '';
-    const detail = formatLossDetail(losses);
+    const detail = buildBattleDetail(sentSnapshot, losses, result.band, ratio);
     if (result.won) {
       const reward = trialStageRewards(stage);
       state.coins += reward.silver;
@@ -3864,14 +3884,16 @@
         rb.defeatedUntil = performance.now() + rb.respawnMs;
         relocateRivalBase(rb);
         rb.scouted = false;
+        const sentSnapshot = { ...m.formation }; // applyFormationLosses mutates m.formation in place
         const losses = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
         const resTag = rb.resType !== 'gold' ? ` + ${rb.resAmt} ${rb.resType}` : '';
         const lossTag = losses.totalLost > 0 ? ` ${losses.totalLost} lost in the fight.` : '';
         const verb = result.band === 'decisive' ? 'Overran' : 'Raided';
-        addLog(`${verb} ${rb.name} — won ${cash} silver${resTag}.${lossTag} They've scattered — regrouping ${Math.round(rb.respawnMs/1000)}s somewhere new.`, 'win', 'combat', formatLossDetail(losses));
+        addLog(`${verb} ${rb.name} — won ${cash} silver${resTag}.${lossTag} They've scattered — regrouping ${Math.round(rb.respawnMs/1000)}s somewhere new.`, 'win', 'combat', buildBattleDetail(sentSnapshot, losses, result.band, ratio));
       } else {
+        const sentSnapshot = { ...m.formation };
         const losses = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
-        addLog(`${hero.name} got run off ${rb.name}${losses.totalLost > 0 ? ` — ${losses.totalLost} lost` : ''}. No loot this time.`, 'lose', 'combat', formatLossDetail(losses));
+        addLog(`${hero.name} got run off ${rb.name}${losses.totalLost > 0 ? ` — ${losses.totalLost} lost` : ''}. No loot this time.`, 'lose', 'combat', buildBattleDetail(sentSnapshot, losses, result.band, ratio));
       }
     } else if (m.kind === 'seize') {
       const ratio = (effectiveAttack(m.formation, GOVERNOR.composition) * heroSkillMultiplier(hero) * (1 + researchBonusPct('troop_attack'))) / GOVERNOR.power;
@@ -3883,11 +3905,13 @@
         state.governorHeld = true;
         gainXp(Math.round(GOVERNOR.power * 2));
         state.eventPoints += 5;
+        const sentSnapshot = { ...m.formation };
         const losses = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
-        addLog(`${hero.name} seized the City Gate${losses.totalLost > 0 ? ` — ${losses.totalLost} lost taking it` : ''}. The city is yours until the next reset.`, 'win', 'combat', formatLossDetail(losses));
+        addLog(`${hero.name} seized the City Gate${losses.totalLost > 0 ? ` — ${losses.totalLost} lost taking it` : ''}. The city is yours until the next reset.`, 'win', 'combat', buildBattleDetail(sentSnapshot, losses, result.band, ratio));
       } else {
+        const sentSnapshot = { ...m.formation };
         const losses = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct));
-        addLog(`${hero.name} couldn't take the City Gate${losses.totalLost > 0 ? ` — ${losses.totalLost} lost` : ''}. Try again once you're stronger.`, 'lose', 'combat', formatLossDetail(losses));
+        addLog(`${hero.name} couldn't take the City Gate${losses.totalLost > 0 ? ` — ${losses.totalLost} lost` : ''}. Try again once you're stronger.`, 'lose', 'combat', buildBattleDetail(sentSnapshot, losses, result.band, ratio));
       }
     } else if (m.kind === 'scout') {
       const target = ref;
@@ -3947,9 +3971,12 @@
     if (result.error) {
       addLog(`Raid failed: ${result.error}`, 'lose', 'combat');
     } else {
+      const sentSnapshot = { ...m.formation }; // applyFormationLosses mutates m.formation in place
       const losses = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct || 0));
       const lossTag = losses.totalLost > 0 ? ` ${losses.totalLost} lost in the fight.` : '';
-      const detail = formatLossDetail(losses);
+      // no numeric ratio here -- resolve-raid only returns the resolved band,
+      // not the odds that produced it (see its response shape)
+      const detail = buildBattleDetail(sentSnapshot, losses, result.band);
       if (result.won) {
         state.coins += result.coinReward;
         const stolen = result.stolen || {};
@@ -3985,9 +4012,10 @@
       addLog(`Someone else took the city at the same moment — try again.`, 'lose', 'combat');
       applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct || 0.2));
     } else {
+      const sentSnapshot = { ...m.formation }; // applyFormationLosses mutates m.formation in place
       const losses = applyFormationLosses(m.formation, effectiveAttackerLossPct(hero, result.attackerLossPct || 0));
       const lossTag = losses.totalLost > 0 ? ` ${losses.totalLost} lost taking it.` : '';
-      const detail = formatLossDetail(losses);
+      const detail = buildBattleDetail(sentSnapshot, losses, result.band);
       if (result.won) {
         // the hero AND the survivors stay stationed at the Gate — this is
         // what makes holding it a real commitment, not just a bigger number.
@@ -4436,7 +4464,15 @@
     if (rearranging) { dragBuilding = null; return; } // rearranging: tap just drops whatever was held, never enters a room
     const { x, y } = campPointerToLogical(clientX, clientY);
     const b = campBuildingAt(x, y);
-    if (b) switchRoom(b.room);
+    if (!b) return;
+    // Mafia City's own base view: tapping a production building with
+    // something ready collects it right there instead of opening the room —
+    // only when there's actually something pending, so a normal tap still
+    // opens the room as always (to upgrade, etc.) once nothing's waiting.
+    if (b.room === 'garage' && state.pendingFuel > 0) { collectGarageOil(); return; }
+    const field = FIELD_TYPES.find(f => f.room === b.room);
+    if (field && state.pendingField[field.key] > 0) { collectFieldResource(field); return; }
+    switchRoom(b.room);
   }
   campCanvas.addEventListener('click', (e) => handleCampTap(e.clientX, e.clientY));
   campCanvas.addEventListener('touchend', (e) => {
@@ -4515,6 +4551,7 @@
     campCanvas.classList.remove('hidden');
     document.getElementById('closeModal').textContent = '← Back to Map';
     document.getElementById('rearrangeBtn').style.display = 'inline-block';
+    document.getElementById('exitToMapBtn').style.display = 'none';
     document.getElementById('mansionTitle').textContent = 'The Camp';
     resizeCampCanvas();
     drawCampScene();
@@ -4535,6 +4572,11 @@
     if (campView === 'overview') closeMansion();
     else showCampOverview();
   });
+  // Any room jumped into directly from a bottom-bar shortcut (Heroes,
+  // Inventory, Market, Reports, etc.) previously needed 2 taps to reach the
+  // map (Back to Overview, then Back to Map) — this gets there in 1 regardless
+  // of how the room was opened.
+  document.getElementById('exitToMapBtn').addEventListener('click', closeMansion);
 
   // Settings has no physical building in CAMP_BUILDINGS (it's only reachable
   // via the Avatar, not a door in the overview scene) — everything else
@@ -4549,6 +4591,7 @@
     campCanvas.classList.add('hidden');
     document.getElementById('closeModal').textContent = '← Back to Overview';
     document.getElementById('rearrangeBtn').style.display = 'none';
+    document.getElementById('exitToMapBtn').style.display = 'inline-block';
     document.getElementById('mansionTitle').textContent = roomDisplayName(room);
     ROOM_IDS.forEach(r => {
       document.getElementById('room-' + r).style.display = (r === room) ? 'block' : 'none';
@@ -7191,7 +7234,11 @@
     render();
   });
 
-  document.getElementById('garageCollectBtn').addEventListener('click', () => {
+  // Shared by the room's own Collect button and a direct tap on the Oil
+  // Press building from the Camp overview (matches Mafia City: tapping a
+  // production building on the base view collects it right there, no need
+  // to open the room first) — see handleCampTap.
+  function collectGarageOil() {
     if (state.pendingFuel <= 0) return;
     const cap = resourceCap();
     const collected = Math.min(state.pendingFuel, Math.max(0, cap - state.resources.fuel));
@@ -7199,7 +7246,8 @@
     state.pendingFuel -= collected;
     addLog(`Collected ${collected.toFixed(1)} oil from the Oil Press.`, 'win', 'gathering');
     render();
-  });
+  }
+  document.getElementById('garageCollectBtn').addEventListener('click', collectGarageOil);
 
   document.getElementById('researchLabBtn').addEventListener('click', () => {
     if (timers.researchLab) {
@@ -7247,17 +7295,20 @@
       addLog(`${field.label} upgrade underway — ${fmtSecs(fieldSiteBuildMs(field))}.`, 'hub', 'building');
       render();
     });
-    document.getElementById(field.room + 'CollectBtn').addEventListener('click', () => {
-      const pending = state.pendingField[field.key];
-      if (pending <= 0) return;
-      const cap = resourceCap();
-      const collected = Math.min(pending, Math.max(0, cap - state.resources[field.key]));
-      state.resources[field.key] += collected;
-      state.pendingField[field.key] -= collected;
-      addLog(`Collected ${collected.toFixed(0)} ${RESOURCE_LABELS[field.key] || field.key} from ${field.label}.`, 'win', 'gathering');
-      render();
-    });
+    document.getElementById(field.room + 'CollectBtn').addEventListener('click', () => collectFieldResource(field));
   });
+  // Same reasoning as collectGarageOil() above — shared by the room's own
+  // Collect button and a direct tap on the building from the Camp overview.
+  function collectFieldResource(field) {
+    const pending = state.pendingField[field.key];
+    if (pending <= 0) return;
+    const cap = resourceCap();
+    const collected = Math.min(pending, Math.max(0, cap - state.resources[field.key]));
+    state.resources[field.key] += collected;
+    state.pendingField[field.key] -= collected;
+    addLog(`Collected ${collected.toFixed(0)} ${RESOURCE_LABELS[field.key] || field.key} from ${field.label}.`, 'win', 'gathering');
+    render();
+  }
 
   document.getElementById('relocateBtn').addEventListener('click', () => {
     if (placingMansion) {
