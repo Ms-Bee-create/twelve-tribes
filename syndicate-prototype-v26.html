@@ -2286,7 +2286,7 @@
   // account-wide tier — the old model let every hero equip the same shared
   // tier at once, which wasn't the intent.
   const GEAR_TYPES = [
-    { key: 'blade',  label: 'Blade of the Tribe',   materials: ['Torn Cloak', 'Bronze Knuckle-Guard'],                    bonusPerTier: 8,    desc: 'Attack',  source: 'Desert Marauders (claws)' },
+    { key: 'blade',  label: 'Blade of the Tribe',   materials: ['Torn Cloak', 'Bronze Knuckle-Guard'],                    bonusPerTier: 8,    desc: 'Attack',  marchCapacityPctPerTier: 0.05, source: 'Desert Marauders (claws)' },
     { key: 'ward',   label: 'Ward of the Covenant', materials: ['Curved Dagger', "Camel Driver's Satchel"],               bonusPerTier: 0.06, desc: 'Losses', capacityPerTier: 500, source: 'Midianite Host (blade)' },
     { key: 'banner', label: 'Banner of Endurance',  materials: ['Iron-Tipped Club', 'Worn Tunic', 'Brass Signet Ring'],   bonusPerTier: 15,   desc: 'Stamina', source: 'Amalekite Raiders (fist) or Philistine Garrison (skull)' },
     { key: 'gate',   label: 'Standard of the Gate', materials: ['Bronze City Seal', "Governor's Insignia"],               bonusPerTier: 5,    desc: 'Attack & Defense', source: 'Winning a Governor’s Gate seizure' },
@@ -2832,9 +2832,28 @@
   // the billions well before level 100 — real games like Mafia City scale
   // march capacity with base level + investment, but nothing that explodes
   // like that, so this caps at a sane, explicit endpoint instead.)
-  function maxDeployable() {
-    const base = Math.round(1000 * Math.pow(state.mansionLevel, 1.15)) + totalResearchLevels() * 5;
-    return Math.round(base * (1 + activeCapacityBoostPct()));
+  //
+  // Mirrors Rise of Kingdoms' real formula (capacity = commander level + city
+  // hall level) by adding the leading hero's own level on top of the shared
+  // Camp base — same curve shape, half the weight, since the hero is a
+  // secondary per-march lever rather than the primary shared building. A
+  // heroless Reinforcement march gets no hero term, only the Camp base.
+  function heroDeployBonus(hero) {
+    if (!hero || hero.isReinforcement) return 0;
+    return Math.round(500 * Math.pow(hero.level, 1.15));
+  }
+  // Blade of the Tribe (the Attack gear set) also raises march size for
+  // whichever hero has it equipped — a % bonus rather than flat, so it stays
+  // meaningful at every Camp level instead of fading out like a flat number
+  // would by the late game (same reasoning Evony's %-based march buffs use).
+  function bladeDeployPct(hero) {
+    const item = heroEquippedGearItem(hero);
+    if (!item || item.type !== 'blade') return 0;
+    return (GEAR_TYPES.find(g => g.key === 'blade').marchCapacityPctPerTier || 0) * item.tier;
+  }
+  function maxDeployable(hero) {
+    const base = Math.round(1000 * Math.pow(state.mansionLevel, 1.15)) + totalResearchLevels() * 5 + heroDeployBonus(hero);
+    return Math.round(base * (1 + activeCapacityBoostPct() + bladeDeployPct(hero)));
   }
 
   function startTimer(key, durationMs, meta) {
@@ -5207,7 +5226,7 @@
     });
     // a preset saved back when the deployment cap was lower should still
     // degrade gracefully instead of silently overshooting today's cap
-    const cap = maxDeployable();
+    const cap = maxDeployable(formationCurrentHero);
     const total = formationTotal(formationValues);
     if (total > cap && total > 0) {
       const scale = cap / total;
@@ -5231,7 +5250,7 @@
 
   function updateFormationPreview() {
     const totalSent = formationTotal(formationValues);
-    const cap = maxDeployable();
+    const cap = maxDeployable(formationCurrentHero);
     const capText = ` (${totalSent}/${cap} sent)`;
     const sendBtn = document.getElementById('formationSendBtn');
     // the picker can leave the CURRENT pick invalid (its default was a hero
@@ -5268,15 +5287,16 @@
     document.getElementById('formationPreview').textContent = text + capText;
   }
 
-  // Bigger base + more research completed = more troops one march can carry
-  // (maxDeployable(), which grows with Camp level and totalResearchLevels())
-  // — clamped here so every entry point (typed value, +/- steppers, Max
-  // button) respects both this troop type's own availability and the shared
-  // cap across the whole formation.
+  // Bigger base + more research completed + the leading hero's own level and
+  // any Blade of the Tribe they have equipped = more troops one march can
+  // carry (maxDeployable(), which grows with Camp level, totalResearchLevels(),
+  // hero level, and gear) — clamped here so every entry point (typed value,
+  // +/- steppers, Max button) respects both this troop type's own
+  // availability and the shared cap across the whole formation.
   function setFormationValue(key, value) {
     const avail = state.troopTypes[key].active;
     const othersSent = formationTotal(formationValues) - (formationValues[key] || 0);
-    const remainingCap = Math.max(0, maxDeployable() - othersSent);
+    const remainingCap = Math.max(0, maxDeployable(formationCurrentHero) - othersSent);
     formationValues[key] = Math.max(0, Math.min(avail, remainingCap, value));
     const t = TROOP_TYPES.find(x => x.key === key);
     if (t && formationRowEls[t.role]) formationRowEls[t.role].renderTier();
@@ -6236,7 +6256,9 @@
 
   function gearBonusText(type, tier) {
     const g = GEAR_TYPES.find(x => x.key === type);
-    return type === 'ward' ? `${g.desc} down ${Math.round(g.bonusPerTier * tier * 100)}%` : `+${Math.round(g.bonusPerTier * tier)} ${g.desc}`;
+    if (type === 'ward') return `${g.desc} down ${Math.round(g.bonusPerTier * tier * 100)}%`;
+    if (type === 'blade') return `+${Math.round(g.bonusPerTier * tier)} ${g.desc} · +${Math.round(g.marchCapacityPctPerTier * tier * 100)}% march size`;
+    return `+${Math.round(g.bonusPerTier * tier)} ${g.desc}`;
   }
   function renderGearRoom() {
     const list = document.getElementById('gearList');
@@ -7653,6 +7675,11 @@
     // so it can't tell you how long you were actually gone.
     offlineElapsedMs = save.lastSaveEpochMs ? Math.max(0, Date.now() - save.lastSaveEpochMs) : 0;
     const gearMigration = migrateGearForSave(save);
+    // nextGearId always starts back at 1 on a fresh page load — without this,
+    // the next craftGear() after any reload would collide with an id already
+    // in the loaded inventory, and .find()-by-id (heroEquippedGearItem, the
+    // upgrade/equip pickers) would silently resolve to the WRONG piece.
+    gearMigration.inventory.forEach(item => { if (item.id >= nextGearId) nextGearId = item.id + 1; });
     Object.assign(state, {
       level: save.state.level, xp: save.state.xp, xpToLevel: save.state.xpToLevel,
       coins: save.state.coins, speedLevel: save.state.speedLevel,
