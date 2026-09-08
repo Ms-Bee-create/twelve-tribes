@@ -55,6 +55,47 @@ create policy "players can only update their own row"
   using (auth.uid() = id)
   with check (auth.uid() = id);
 
+-- Cheap self-consistency tripwire (2026-09-08, migration_009), NOT real
+-- anti-cheat: the above policy lets a signed-in client push any values it
+-- wants for its own row, and resolve-raid/seize-governor trust `troops` as
+-- real combat input. A full server-authoritative economy would close this
+-- properly but is a much bigger rewrite that cuts against this game's whole
+-- "economy stays local" design — deliberately not done. Instead: the game's
+-- own powerRating() always sums the troop-tierMult term (weight exactly 1)
+-- plus several other non-negative contributors, so an HONEST client's
+-- pushed `power` can never be less than what its own pushed `troops` alone
+-- imply. Rejects a row that fails that (a naive stat edit or broken client
+-- math) — does NOT catch troops+power inflated together, an accepted risk.
+create or replace function players_validate_profile()
+returns trigger
+language plpgsql
+as $$
+declare
+  troop_floor numeric := 0;
+  tier_mult numeric[] := array[1.0, 2.0, 3.5, 5.0, 7.0]; -- index 1-5, matches TROOP_TYPES' tierMult
+  k text;
+  v jsonb;
+  tier int;
+begin
+  if new.troops is not null then
+    for k, v in select * from jsonb_each(new.troops) loop
+      tier := nullif(right(k, 1), '')::int;
+      if tier between 1 and 5 then
+        troop_floor := troop_floor + coalesce((v->>'active')::numeric, 0) * tier_mult[tier];
+      end if;
+    end loop;
+  end if;
+  if new.power < troop_floor - 5 then -- small buffer absorbing the client's own rounding
+    raise exception 'players.power (%) is inconsistent with players.troops (implies at least %)', new.power, troop_floor;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger players_validate_profile_trigger
+  before insert or update on players
+  for each row execute function players_validate_profile();
+
 -- one row only, id is always 1 — this is the single shared Governor's Office
 create table city_control (
   id integer primary key default 1 check (id = 1),
@@ -120,11 +161,28 @@ create policy "a player can read prisoners they own or hold"
   to authenticated
   using (auth.uid() = owner_id or auth.uid() = captor_id);
 
-create policy "the captor can execute a prisoner they hold"
-  on prisoners for update
-  to authenticated
-  using (auth.uid() = captor_id)
-  with check (auth.uid() = captor_id);
+-- No client-side UPDATE policy on purpose (2026-09-08, migration_009): an
+-- earlier "captor can execute" policy only checked WHO was asking, not WHICH
+-- column changed — RLS can't restrict to one column, so a captor could also
+-- rewrite captured_at (defeating the 8-hour guaranteed-revive timeout) or
+-- owner_id (orphaning the row from its real owner). Execute now goes through
+-- this function instead, which only ever touches executed_at.
+create or replace function execute_prisoner(p_id bigint)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update prisoners
+  set executed_at = now()
+  where id = p_id
+    and captor_id = auth.uid()
+    and executed_at is null;
+end;
+$$;
+
+grant execute on function execute_prisoner(bigint) to authenticated;
 
 create policy "the owner can clear a resolved prisoner row"
   on prisoners for delete

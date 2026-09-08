@@ -6832,7 +6832,10 @@
         btn.disabled = executed;
         if (!executed) {
           btn.addEventListener('click', async () => {
-            const { error } = await sb.from('prisoners').update({ executed_at: new Date().toISOString() }).eq('id', row.id);
+            // Goes through a Postgres function (not a raw table update) so the
+            // captor can only ever flip executed_at, never any other column
+            // on a prisoner row they hold (see migration_009).
+            const { error } = await sb.rpc('execute_prisoner', { p_id: row.id });
             if (error) { addLog(`Couldn't execute: ${error.message}`, 'lose', 'combat'); render(); return; }
             addLog(`Executed ${row.hero_name} — no ransom, just ends it.`, 'win', 'combat');
             await mpPullPrisonData();
