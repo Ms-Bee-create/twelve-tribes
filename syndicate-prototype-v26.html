@@ -2391,6 +2391,11 @@
   // referencing a `let` before that point would throw
   let otherPlayers = []; // other real players' public profiles, once signed in
   let mpSession = null;     // this browser's Supabase auth session, once signed in
+  // Same early-declaration reasoning as above — drawCampVisualEffect() is
+  // called from the map draw loop, which runs synchronously on load, before
+  // a `let` declared down near flashCampUnderAttack() would exist yet.
+  let campVisualEffect = null; // 'fire' | 'smoke' | null
+  let campVisualUntil = 0;
   let mpCityControl = null; // the shared City Gate row: { held_by, power, cycle_ends_at }
 
   const heroes = [makeHero(0)];
@@ -3953,6 +3958,7 @@
     scoutMarches.forEach(drawHeroTrail);
 
     drawMansion();
+    drawCampVisualEffect();
     hubs.forEach(drawHub);
     targets.forEach(drawTarget);
     rivalBases.forEach(drawRivalBase);
@@ -8780,6 +8786,12 @@
   // So: check raid_log for anything new against us, apply it locally (and
   // log it, the "you were raided while away" you'd expect), before any push.
   const MP_SEEN_RAID_KEY = 'syndicate-mp-last-seen-raid';
+  // Fire when you lose a defense, smoke when you hold it -- her explicit
+  // ask, a visual aftermath on your own camp icon separate from the
+  // full-screen red flash (that's the instant warning; this is "what
+  // actually happened," lingering on the map). Previously this only ever
+  // queried won=true rows (raids that beat you) -- a successfully repelled
+  // attack never surfaced at all, so there was nothing to show smoke for.
   async function mpCheckIncomingRaids() {
     if (!mpSession) return;
     try {
@@ -8787,34 +8799,48 @@
       const { data, error } = await sb.from('raid_log')
         .select('*')
         .eq('defender_id', mpSession.user.id)
-        .eq('won', true)
         .gt('id', lastSeen)
         .order('id', { ascending: true });
       if (error || !data || !data.length) return;
-      flashCampUnderAttack();
+      let anyLost = false, anyHeld = false;
       data.forEach(row => {
-        const stolen = row.troops_stolen || {};
-        let anyStolen = false;
-        TROOP_TYPES.forEach(t => {
-          const n = stolen[t.key] || 0;
-          if (n > 0) {
-            state.troopTypes[t.key].wounded = Math.max(0, state.troopTypes[t.key].wounded - n);
-            anyStolen = true;
-          }
-        });
         const attackerName = (otherPlayers.find(p => p.id === row.attacker_id) || {}).display_name || 'a rival player';
-        const raidMsg = anyStolen
-          ? `While you were away: ${attackerName} raided you and made off with some wounded troops.`
-          : `While you were away: ${attackerName} raided you but came away with nothing but coin.`;
-        // defender_losses is a real per-troop-type breakdown the server
-        // already computed (added alongside the Prison feature) — older
-        // rows from before that migration default to empty, same shape
-        // formatLossDetail() already expects for the attacker's own reports.
-        const defLosses = (row.defender_losses && row.defender_losses.killed) ? row.defender_losses : { killed: {}, wounded: {} };
-        addLog(raidMsg, 'lose', 'combat', formatLossDetail(defLosses));
-        if (state.settings.notifyRaided) fireNotification('Twelve Tribes', raidMsg);
+        if (row.won) {
+          anyLost = true;
+          const stolen = row.troops_stolen || {};
+          let anyStolen = false;
+          TROOP_TYPES.forEach(t => {
+            const n = stolen[t.key] || 0;
+            if (n > 0) {
+              state.troopTypes[t.key].wounded = Math.max(0, state.troopTypes[t.key].wounded - n);
+              anyStolen = true;
+            }
+          });
+          const raidMsg = anyStolen
+            ? `While you were away: ${attackerName} raided you and made off with some wounded troops.`
+            : `While you were away: ${attackerName} raided you but came away with nothing but coin.`;
+          // defender_losses is a real per-troop-type breakdown the server
+          // already computed (added alongside the Prison feature) — older
+          // rows from before that migration default to empty, same shape
+          // formatLossDetail() already expects for the attacker's own reports.
+          const defLosses = (row.defender_losses && row.defender_losses.killed) ? row.defender_losses : { killed: {}, wounded: {} };
+          addLog(raidMsg, 'lose', 'combat', formatLossDetail(defLosses));
+          if (state.settings.notifyRaided) fireNotification('Twelve Tribes', raidMsg);
+        } else {
+          anyHeld = true;
+          const raidMsg = `While you were away: ${attackerName} tried to raid you and was driven off.`;
+          addLog(raidMsg, 'win', 'combat');
+        }
         localStorage.setItem(MP_SEEN_RAID_KEY, String(row.id));
       });
+      // A lost defense is the worse, more urgent outcome -- if both happened
+      // while away in the same batch, fire wins over smoke.
+      if (anyLost) {
+        flashCampUnderAttack();
+        setCampVisualEffect('fire', 6 * 60 * 60 * 1000); // lingers on the map for 6h, or until the next raid outcome replaces it
+      } else if (anyHeld) {
+        setCampVisualEffect('smoke', 6 * 60 * 60 * 1000);
+      }
       render();
     } catch (e) { /* try again on the next pull cycle */ }
   }
@@ -9003,6 +9029,50 @@
     void el.offsetWidth; // force a reflow so re-triggering restarts the animation
     el.classList.add('active');
     setTimeout(() => el.classList.remove('active'), 2900);
+  }
+
+  // Fire/smoke on your own Camp icon, the lingering "what actually
+  // happened" visual (the red flash above is the instant warning; this is
+  // the aftermath you'll still see on the map afterward). Not save/load
+  // persisted, same ephemeral treatment as the flash itself. (campVisualEffect/
+  // campVisualUntil are declared up near otherPlayers/mpSession -- see that
+  // comment for why.)
+  function setCampVisualEffect(effect, durationMs) {
+    campVisualEffect = effect;
+    campVisualUntil = performance.now() + durationMs;
+  }
+  function drawCampVisualEffect() {
+    if (!campVisualEffect || performance.now() > campVisualUntil) return;
+    const now = performance.now();
+    const x = BASE.x, y = BASE.y - 22; // roughly above the roofline regardless of Camp level/size
+    if (campVisualEffect === 'fire') {
+      for (let i = 0; i < 4; i++) {
+        const seed = i * 137;
+        const flicker = Math.sin(now / 120 + seed) * 3;
+        const fx = x + (i - 1.5) * 10;
+        const fy = y - Math.abs(Math.sin(now / 300 + seed)) * 6;
+        const grad = ctx.createRadialGradient(fx, fy, 0, fx, fy, 10);
+        grad.addColorStop(0, 'rgba(255,210,120,0.9)');
+        grad.addColorStop(0.5, 'rgba(230,110,40,0.7)');
+        grad.addColorStop(1, 'rgba(230,110,40,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.ellipse(fx + flicker, fy, 7, 12, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (campVisualEffect === 'smoke') {
+      for (let i = 0; i < 3; i++) {
+        const seed = i * 211;
+        const cycle = (now / 1000 + seed) % 3;
+        const sx = x + (i - 1) * 8 + Math.sin(now / 400 + seed) * 4;
+        const sy = y - cycle * 14;
+        const alpha = Math.max(0, 0.35 * (1 - cycle / 3));
+        ctx.fillStyle = `rgba(120,120,120,${alpha})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 6 + cycle * 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
 
   mpCheckSessionAndProfile();
