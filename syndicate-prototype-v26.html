@@ -4148,7 +4148,23 @@
       const isGate = target === GOVERNOR;
       const power = isGate ? (mpSession && mpCityControl ? mpEffectiveGovernorPower() : GOVERNOR.power) : rivalPower(target);
       const label = isGate ? 'the City Gate' : target.name;
-      addLog(`Scouted ${label} — power ${power}.`, 'hub', 'combat');
+      // What the scout actually found: a real player's real garrisoned
+      // troops when there is one (mpGovernorGarrison() already has real
+      // per-type counts), otherwise a synthesized composition built the
+      // same way the formation preview and the kill-simulation resolver
+      // both already do, from the target's existing power+proportions.
+      const realGarrison = (isGate && mpSession && mpCityControl) ? mpGovernorGarrison() : null;
+      let troopsFound;
+      if (realGarrison) {
+        troopsFound = {};
+        TROOP_TYPES.forEach(t => { const n = realGarrison[t.key]?.active || 0; if (n > 0) troopsFound[t.key] = n; });
+      } else {
+        const proportions = isGate ? GOVERNOR.composition : rivalComposition(target);
+        const tier = target.isBoss ? 5 : Math.max(1, Math.min(5, Math.ceil(power / 500)));
+        troopsFound = synthesizeOpponentTroops(power, proportions, tier);
+      }
+      const troopDetail = formatSentByLine(troopsFound);
+      addLog(`Scouted ${label} — power ${power}.`, 'hub', 'combat', troopDetail.length ? troopDetail : null);
     }
 
     // return leg is planned now, using wherever home is at this exact moment —
