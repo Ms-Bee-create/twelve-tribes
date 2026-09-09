@@ -1714,15 +1714,32 @@
     // at generation time — so they never fall behind as you grow, and stacking
     // one troop type doesn't trivially win. `power`/`composition` here are just
     // unused placeholders (every real read goes through the helpers).
-    { name: "Goliath's Bastion",         isBoss: true, bossMult: 0.85, region: { x1: 900,  y1: 1650, x2: 1200, y2: 2100 }, power: 0, cost: 50, cashMin: 2000, cashMax: 2800, resType: 'gold', resAmt: 0, respawnMs: 120000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
-    { name: "Og of Bashan's Fortress",   isBoss: true, bossMult: 1.0,  region: { x1: 2000, y1: 1200, x2: 2300, y2: 1650 }, power: 0, cost: 50, cashMin: 2600, cashMax: 3400, resType: 'gold', resAmt: 0, respawnMs: 120000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
-    { name: "Sennacherib's Legion",      isBoss: true, bossMult: 1.15, region: { x1: 2400, y1: 300,  x2: 2800, y2: 900 },  power: 0, cost: 50, cashMin: 3200, cashMax: 4200, resType: 'gold', resAmt: 0, respawnMs: 120000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
+    { name: "Goliath's Bastion",         isBoss: true, liveScaled: true, bossMult: 0.85, region: { x1: 900,  y1: 1650, x2: 1200, y2: 2100 }, power: 0, cost: 50, cashMin: 2000, cashMax: 2800, resType: 'gold', resAmt: 0, respawnMs: 120000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
+    { name: "Og of Bashan's Fortress",   isBoss: true, liveScaled: true, bossMult: 1.0,  region: { x1: 2000, y1: 1200, x2: 2300, y2: 1650 }, power: 0, cost: 50, cashMin: 2600, cashMax: 3400, resType: 'gold', resAmt: 0, respawnMs: 120000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
+    { name: "Sennacherib's Legion",      isBoss: true, liveScaled: true, bossMult: 1.15, region: { x1: 2400, y1: 300,  x2: 2800, y2: 900 },  power: 0, cost: 50, cashMin: 3200, cashMax: 4200, resType: 'gold', resAmt: 0, respawnMs: 120000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
+    // Medium Mansions: a real rung between the small named camps above and
+    // the always-hard Boss Mansions -- liveScaled (never falls behind) but
+    // NOT isBoss (a fixed balanced composition, no role-countering), at a
+    // real fraction of the attacker's own current power so they stay
+    // beatable-with-effort at any progression stage.
+    { name: "Amalekite Rearguard", isBoss: false, liveScaled: true, bossMult: 0.30, region: { x1: 700,  y1: 1050, x2: 950,  y2: 1300 }, power: 0, cost: 42, cashMin: 800,  cashMax: 1200, resType: 'lumber', resAmt: 60, respawnMs: 60000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
+    { name: "Hivite Watchtower",   isBoss: false, liveScaled: true, bossMult: 0.35, region: { x1: 1750, y1: 900,  x2: 2000, y2: 1150 }, power: 0, cost: 44, cashMin: 1000, cashMax: 1500, resType: 'food',   resAmt: 70, respawnMs: 60000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
+    { name: "Gibeonite Bastion",   isBoss: false, liveScaled: true, bossMult: 0.40, region: { x1: 1100, y1: 1800, x2: 1350, y2: 2050 }, power: 0, cost: 46, cashMin: 1200, cashMax: 1800, resType: 'water',  resAmt: 80, respawnMs: 60000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
+    { name: "Perizzite Hold",      isBoss: false, liveScaled: true, bossMult: 0.45, region: { x1: 2300, y1: 1700, x2: 2550, y2: 1950 }, power: 0, cost: 48, cashMin: 1400, cashMax: 2000, resType: 'gold',   resAmt: 0,  respawnMs: 60000, composition: { enforcer: 0.34, gunner: 0.33, driver: 0.33 } },
     ...generateScatteredCamps(),
   ].map(rb => ({ ...rb, x: 0, y: 0, scouted: false, defeatedUntil: 0, flashUntil: 0, flashColor: null }));
 
   // Boss Mansions read live off the player's own power/dominant role instead
   // of a static baked-in value — see the rivalBases entries above.
-  function rivalPower(rb) { return rb.isBoss ? Math.round(powerRating() * rb.bossMult) : rb.power; }
+  // liveScaled (Boss Mansions AND Medium Mansions) recomputes power fresh
+  // off the ATTACKER's own current power every read, instead of a fixed
+  // number baked in at generation time -- so it never falls behind as you
+  // grow. isBoss additionally leans the composition into countering the
+  // attacker's dominant role (see rivalComposition below); a Medium
+  // Mansion is liveScaled but NOT isBoss, so it's an always-relevant fight
+  // at a real fixed fraction of your own power, without the boss-fight
+  // role-countering on top.
+  function rivalPower(rb) { return rb.liveScaled ? Math.round(powerRating() * rb.bossMult) : rb.power; }
   function dominantTroopRole() {
     const totals = { enforcer: 0, gunner: 0, driver: 0 };
     TROOP_TYPES.forEach(t => { totals[t.role] += state.troopTypes[t.key].active; });
@@ -2159,13 +2176,31 @@
   function synthesizeOpponentTroops(power, proportions, tier) {
     const tierMultByTier = [1.0, 2.0, 3.5, 5.0, 7.0];
     const clampedTier = Math.max(1, Math.min(5, Math.round(tier)));
-    const tierMult = tierMultByTier[clampedTier - 1];
+    const secondaryTier = Math.max(1, clampedTier - 1);
     const composition = {};
     ['enforcer', 'gunner', 'driver'].forEach(role => {
       const share = (proportions && proportions[role]) || 0;
       if (share <= 0) return;
-      const count = Math.round((power * share) / (tierMult * ROLE_DEFENSE[role]));
-      if (count > 0) composition[`${role}${clampedTier}`] = count;
+      const roleValue = power * share; // this role's total effectiveDefense budget
+      if (secondaryTier === clampedTier) {
+        const count = Math.round(roleValue / (tierMultByTier[clampedTier - 1] * ROLE_DEFENSE[role]));
+        if (count > 0) composition[`${role}${clampedTier}`] = count;
+        return;
+      }
+      // Real formations mix tiers within a role rather than fielding one
+      // flat tier -- confirmed via a direct quote from Flavio Gaming's own
+      // guide ("20k T10 and 10k T8 bikers", a real ~2:1 split by count
+      // between the main tier and one below: https://flaviogaming.com/troop-setup-guide-mafia-city/).
+      // Splitting the underlying defense VALUE (not the raw count) 67/33
+      // keeps rivalPower()'s promised total strength exact either way, and
+      // gives the resolver's onion-split damage (see resolveCombatKills)
+      // real texture to work with even within a single role.
+      const mainMult = tierMultByTier[clampedTier - 1] * ROLE_DEFENSE[role];
+      const secMult = tierMultByTier[secondaryTier - 1] * ROLE_DEFENSE[role];
+      const mainCount = Math.round((roleValue * 0.67) / mainMult);
+      const secCount = Math.round((roleValue * 0.33) / secMult);
+      if (mainCount > 0) composition[`${role}${clampedTier}`] = mainCount;
+      if (secCount > 0) composition[`${role}${secondaryTier}`] = secCount;
     });
     return composition;
   }
@@ -2191,6 +2226,31 @@
   // model's equivalent of the old effectiveAttackerLossPct's loss-percentage
   // reduction) — pass 1 for none.
   const COMBAT_ROUND_CAP = 400;
+  // Her explicit ask: "it shouldn't be that only the tanks take damage."
+  // Each round's damage no longer lands 100% on the current front group --
+  // it splits across every currently-alive group behind it too, front-
+  // heaviest (a real "onion": the outer layer eats the biggest share, but
+  // a real fraction always penetrates deeper, even before the front is
+  // fully dead). ONION_FRONT_SHARE is the one knob to retune this by feel
+  // ("we may need to fine tune the onion layers") -- 1.0 would collapse
+  // back to the old 100%-sequential behavior, lower numbers let more
+  // splash through to the rear.
+  const ONION_FRONT_SHARE = 0.6;
+  function applyOnionDamage(groups, fromIndex, totalDamage, lossesOut) {
+    if (totalDamage <= 0) return;
+    const alive = [];
+    for (let i = fromIndex; i < groups.length; i++) if (groups[i].count > 0) alive.push(groups[i]);
+    let remaining = 1;
+    alive.forEach((g, idx) => {
+      const isLast = idx === alive.length - 1;
+      const share = isLast ? remaining : remaining * ONION_FRONT_SHARE;
+      if (!isLast) remaining -= share;
+      const dmg = totalDamage * share;
+      const kills = Math.min(g.count, Math.max(0, Math.round(dmg / hpPerUnit(g.t))));
+      g.count -= kills;
+      if (kills > 0) lossesOut[g.t.key] = (lossesOut[g.t.key] || 0) + kills;
+    });
+  }
   function resolveCombatKills(attackerFormation, defenderTroops, attackerDmgMult, defenderDmgMult, attackerMitigation) {
     const atk = TROOP_TYPES.filter(t => (attackerFormation[t.key] || 0) > 0).map(t => ({ t, count: attackerFormation[t.key] }));
     const def = TROOP_TYPES.filter(t => (defenderTroops[t.key] || 0) > 0).map(t => ({ t, count: defenderTroops[t.key] }));
@@ -2199,17 +2259,18 @@
     let ai = 0, di = 0, rounds = 0;
     while (ai < atk.length && di < def.length && rounds < COMBAT_ROUND_CAP) {
       rounds++;
+      // Counter-multiplier and overall damage output are still anchored to
+      // the current front-most group on each side (the primary matchup) --
+      // only WHO ABSORBS that damage spreads via the onion split below, not
+      // who's dealing it.
       const A = atk[ai], D = def[di];
       const variance = 0.9 + Math.random() * 0.2;
       const dmgToD = A.count * dmgPerUnit(A.t) * counterMultiplier(A.t.role, D.t.role) * attackerDmgMult * variance;
       const dmgToA = D.count * dmgPerUnit(D.t) * counterMultiplier(D.t.role, A.t.role) * defenderDmgMult * variance * attackerMitigation;
-      const killsOnD = Math.min(D.count, Math.max(0, Math.round(dmgToD / hpPerUnit(D.t))));
-      const killsOnA = Math.min(A.count, Math.max(0, Math.round(dmgToA / hpPerUnit(A.t))));
-      D.count -= killsOnD; A.count -= killsOnA;
-      if (killsOnD > 0) defenderLosses[D.t.key] = (defenderLosses[D.t.key] || 0) + killsOnD;
-      if (killsOnA > 0) attackerLosses[A.t.key] = (attackerLosses[A.t.key] || 0) + killsOnA;
-      if (D.count <= 0) di++;
-      if (A.count <= 0) ai++;
+      applyOnionDamage(def, di, dmgToD, defenderLosses);
+      applyOnionDamage(atk, ai, dmgToA, attackerLosses);
+      while (di < def.length && def[di].count <= 0) di++;
+      while (ai < atk.length && atk[ai].count <= 0) ai++;
     }
     // Safety valve for a near-perfectly-matched pair that would otherwise
     // grind toward zero forever (real, but rare) -- force a decision by
