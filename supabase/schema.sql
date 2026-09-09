@@ -72,7 +72,7 @@ language plpgsql
 as $$
 declare
   troop_floor numeric := 0;
-  tier_mult numeric[] := array[1.0, 2.0, 3.5, 5.0, 7.0]; -- index 1-5, matches TROOP_TYPES' tierMult
+  tier_mult numeric[] := array[1.0, 2.0, 3.5, 5.0, 7.0, 9.5]; -- index 1-6, matches TROOP_TYPES' tierMult
   k text;
   v jsonb;
   tier int;
@@ -80,7 +80,7 @@ begin
   if new.troops is not null then
     for k, v in select * from jsonb_each(new.troops) loop
       tier := nullif(right(k, 1), '')::int;
-      if tier between 1 and 5 then
+      if tier between 1 and 6 then
         troop_floor := troop_floor + coalesce((v->>'active')::numeric, 0) * tier_mult[tier];
       end if;
     end loop;

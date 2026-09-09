@@ -1398,11 +1398,11 @@
     speedLevel: 1,
     mansionLevel: 1,
     barracksLevel: 1,
-    // 3 roles x 5 tiers each — see TROOP_TYPES below for what each unlocks at
+    // 3 roles x 6 tiers each — see TROOP_TYPES below for what each unlocks at
     troopTypes: {
-      enforcer1: { active: 0, wounded: 0 }, enforcer2: { active: 0, wounded: 0 }, enforcer3: { active: 0, wounded: 0 }, enforcer4: { active: 0, wounded: 0 }, enforcer5: { active: 0, wounded: 0 },
-      gunner1:   { active: 0, wounded: 0 }, gunner2:   { active: 0, wounded: 0 }, gunner3:   { active: 0, wounded: 0 }, gunner4:   { active: 0, wounded: 0 }, gunner5:   { active: 0, wounded: 0 },
-      driver1:   { active: 0, wounded: 0 }, driver2:   { active: 0, wounded: 0 }, driver3:   { active: 0, wounded: 0 }, driver4:   { active: 0, wounded: 0 }, driver5:   { active: 0, wounded: 0 },
+      enforcer1: { active: 0, wounded: 0 }, enforcer2: { active: 0, wounded: 0 }, enforcer3: { active: 0, wounded: 0 }, enforcer4: { active: 0, wounded: 0 }, enforcer5: { active: 0, wounded: 0 }, enforcer6: { active: 0, wounded: 0 },
+      gunner1:   { active: 0, wounded: 0 }, gunner2:   { active: 0, wounded: 0 }, gunner3:   { active: 0, wounded: 0 }, gunner4:   { active: 0, wounded: 0 }, gunner5:   { active: 0, wounded: 0 }, gunner6:   { active: 0, wounded: 0 },
+      driver1:   { active: 0, wounded: 0 }, driver2:   { active: 0, wounded: 0 }, driver3:   { active: 0, wounded: 0 }, driver4:   { active: 0, wounded: 0 }, driver5:   { active: 0, wounded: 0 }, driver6:   { active: 0, wounded: 0 },
     },
     hospitalLevel: 1,
     warehouseLevel: 1,
@@ -1973,6 +1973,7 @@
       { tier: 3, roman: 'III', tierMult: 3.5, unlockMansion: 6 },
       { tier: 4, roman: 'IV',  tierMult: 5.0, unlockMansion: 12 },
       { tier: 5, roman: 'V',   tierMult: 7.0, unlockMansion: 20 },
+      { tier: 6, roman: 'VI',  tierMult: 9.5, unlockMansion: 28 },
     ];
     const list = [];
     TROOP_ROLES.forEach(r => tiers.forEach(t => list.push({
@@ -2174,8 +2175,8 @@
   // difficulty proxy) -- a first-pass, tunable-by-feel choice like every
   // other curve in this file, not load-bearing precision.
   function synthesizeOpponentTroops(power, proportions, tier) {
-    const tierMultByTier = [1.0, 2.0, 3.5, 5.0, 7.0];
-    const clampedTier = Math.max(1, Math.min(5, Math.round(tier)));
+    const tierMultByTier = [1.0, 2.0, 3.5, 5.0, 7.0, 9.5];
+    const clampedTier = Math.max(1, Math.min(6, Math.round(tier)));
     const secondaryTier = Math.max(1, clampedTier - 1);
     const composition = {};
     ['enforcer', 'gunner', 'driver'].forEach(role => {
@@ -2212,8 +2213,14 @@
   // console testing) so a typical fight takes a handful of real rounds.
   const BASE_HP = 40;
   const BASE_DMG = 6;
-  function hpPerUnit(t) { return BASE_HP * t.tierMult * ROLE_DEFENSE[t.role]; }
-  function dmgPerUnit(t) { return BASE_DMG * t.tierMult * ROLE_ATTACK[t.role]; }
+  // Real Mafia City troops alternate sub-role along ONE tier line rather than
+  // running two parallel lines (confirmed via code7x.blogspot.com's tier
+  // breakdown) -- odd tiers lean defense, even tiers lean offense, on top of
+  // the existing role-level ROLE_ATTACK/ROLE_DEFENSE split.
+  const VARIANT_SWING = 0.15;
+  function variantSign(t) { return t.tier % 2 === 1 ? 1 : -1; }
+  function hpPerUnit(t) { return BASE_HP * t.tierMult * ROLE_DEFENSE[t.role] * (1 + variantSign(t) * VARIANT_SWING); }
+  function dmgPerUnit(t) { return BASE_DMG * t.tierMult * ROLE_ATTACK[t.role] * (1 - variantSign(t) * VARIANT_SWING); }
 
   // The real kill-simulation resolver. Fights attackerFormation against
   // defenderTroops front-to-back (TROOP_TYPES' existing Shieldbearer(I-V)->
@@ -2920,7 +2927,7 @@
     // level per tier, same discrete-milestone shape as Logistics Corps above.
     // Camp level ALSO still gates each tier (see troopUnlocked()) — matches
     // Mafia City's own combined building+tech gate for high-tier troops.
-    const ADVANCED_MUSTER_LAB_LEVELS = [3, 6, 12, 20];
+    const ADVANCED_MUSTER_LAB_LEVELS = [3, 6, 12, 20, 28];
     ADVANCED_MUSTER_LAB_LEVELS.forEach((labLevel, i) => {
       const level = i + 1;
       list.push({

@@ -13,6 +13,7 @@ export const TROOP_TYPES: { key: string; role: "enforcer" | "gunner" | "driver";
     { tier: 3, tierMult: 3.5 },
     { tier: 4, tierMult: 5.0 },
     { tier: 5, tierMult: 7.0 },
+    { tier: 6, tierMult: 9.5 },
   ];
   const list: { key: string; role: "enforcer" | "gunner" | "driver"; tierMult: number }[] = [];
   roles.forEach((role) => tiers.forEach((t) => list.push({ key: `${role}${t.tier}`, role, tierMult: t.tierMult })));
