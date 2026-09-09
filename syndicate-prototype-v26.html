@@ -832,6 +832,7 @@
         <span class="mansion-title" id="mansionTitle">The Camp</span>
         <span class="mansion-coins" id="mansionCoinsBadge">💰 100</span>
       </div>
+      <button class="modal-close" id="collectAllBtn" style="display:none">Collect All</button>
       <button class="modal-close" id="rearrangeBtn" style="display:none">Rearrange</button>
       <button class="modal-close" id="exitToMapBtn" style="display:none">Exit to Map</button>
       <button class="modal-close" id="closeModal">← Back to Map</button>
@@ -4779,6 +4780,7 @@
 
   function drawCampScene() {
     if (campCanvas.classList.contains('hidden')) return;
+    if (campView === 'overview') document.getElementById('collectAllBtn').style.display = anyPendingCollectible() ? 'inline-block' : 'none';
     campCtx.setTransform(1, 0, 0, 1, 0, 0);
     campCtx.clearRect(0, 0, campCanvas.width, campCanvas.height);
     const s = campScale(), off = campOffset();
@@ -4814,12 +4816,11 @@
     const b = campBuildingAt(x, y);
     if (!b) return;
     // Mafia City's own base view: tapping a production building with
-    // something ready collects it right there instead of opening the room —
-    // only when there's actually something pending, so a normal tap still
-    // opens the room as always (to upgrade, etc.) once nothing's waiting.
-    if (b.room === 'garage' && state.pendingFuel > 0) { collectGarageOil(); return; }
+    // something ready collects it right there — but still opens the room
+    // after, so a tap never blocks getting in to upgrade/manage plots.
+    if (b.room === 'garage' && state.pendingFuel > 0) collectGarageOil();
     const field = FIELD_TYPES.find(f => f.room === b.room);
-    if (field && state.pendingField[field.key] > 0) { collectFieldResource(field); return; }
+    if (field && state.pendingField[field.key] > 0) collectFieldResource(field);
     switchRoom(b.room);
   }
   campCanvas.addEventListener('click', (e) => handleCampTap(e.clientX, e.clientY));
@@ -4893,12 +4894,26 @@
   });
 
   let campView = 'overview'; // 'overview' | one of ROOM_IDS
+  // Whether anything is currently sitting uncollected across the garage or
+  // any field plot -- same pending sources handleCampTap already taps into
+  // per-building, just checked in bulk for the overview's "Collect All".
+  function anyPendingCollectible() {
+    if (state.pendingFuel > 0) return true;
+    return FIELD_TYPES.some(f => state.pendingField[f.key] > 0);
+  }
+  function collectAllPending() {
+    if (state.pendingFuel > 0) collectGarageOil();
+    FIELD_TYPES.forEach(f => { if (state.pendingField[f.key] > 0) collectFieldResource(f); });
+    drawCampScene();
+  }
+  document.getElementById('collectAllBtn').addEventListener('click', collectAllPending);
   function showCampOverview() {
     campView = 'overview';
     ROOM_IDS.forEach(r => { document.getElementById('room-' + r).style.display = 'none'; });
     campCanvas.classList.remove('hidden');
     document.getElementById('closeModal').textContent = '← Back to Map';
     document.getElementById('rearrangeBtn').style.display = 'inline-block';
+    document.getElementById('collectAllBtn').style.display = anyPendingCollectible() ? 'inline-block' : 'none';
     document.getElementById('exitToMapBtn').style.display = 'none';
     document.getElementById('mansionTitle').textContent = 'The Camp';
     resizeCampCanvas();
@@ -4939,6 +4954,7 @@
     campCanvas.classList.add('hidden');
     document.getElementById('closeModal').textContent = '← Back to Overview';
     document.getElementById('rearrangeBtn').style.display = 'none';
+    document.getElementById('collectAllBtn').style.display = 'none';
     document.getElementById('exitToMapBtn').style.display = 'inline-block';
     document.getElementById('mansionTitle').textContent = roomDisplayName(room);
     ROOM_IDS.forEach(r => {
