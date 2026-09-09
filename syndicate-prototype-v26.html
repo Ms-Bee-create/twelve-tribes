@@ -2067,16 +2067,28 @@
   function effectiveKillShare() { return Math.max(0.05, ATTACKER_KILL_SHARE - researchBonusPct('first_aid')); }
   // Returns a full per-troop-type breakdown (not just a total) so callers
   // can build a real combat report instead of one summary line.
+  //
+  // Losses drain FRONT-TO-BACK through the whole formation as one shared
+  // pool, not independently per troop type -- mirrors Mafia City's real
+  // formation layering (front-line roles get hit before back-line roles,
+  // regardless of tier; confirmed via https://flaviogaming.com/troop-setup-guide-mafia-city/).
+  // TROOP_TYPES is already generated Shieldbearer(I-V) -> Archer(I-V) ->
+  // Rider(I-V) -- exactly front-to-back, ascending tier within each role --
+  // so walking it in order and draining the hit count as we go IS the
+  // front-line-protects-back-line effect, no new ordering data needed.
   function applyFormationLosses(formation, lossPct) {
     let totalLost = 0;
     const killed = {};
     const wounded = {};
     let capacityLeft = Math.max(0, hospitalCapacity() - totalWoundedTroops());
+    const totalSent = TROOP_TYPES.reduce((sum, t) => sum + (formation[t.key] || 0), 0);
+    let remainingHit = Math.min(totalSent, Math.round(totalSent * lossPct));
     TROOP_TYPES.forEach(t => {
+      if (remainingHit <= 0) return;
       const sent = formation[t.key] || 0;
       if (sent <= 0) return;
-      const hit = Math.round(sent * lossPct);
-      if (hit <= 0) return;
+      const hit = Math.min(sent, remainingHit);
+      remainingHit -= hit;
       let killedCount = Math.round(hit * effectiveKillShare());
       let woundedCount = hit - killedCount;
       if (woundedCount > capacityLeft) {
@@ -2110,19 +2122,43 @@
   function formatFormationLines(formation) {
     return TROOP_TYPES.filter(t => (formation[t.key] || 0) > 0).map(t => `${formation[t.key]} ${t.label}`);
   }
+  // Groups formation counts by TROOP_ROLES' own Front/Mid/Back line label —
+  // reused for both "what was sent" and "what was lost" below, so the report
+  // makes the front-to-back tanking effect visible: if a line doesn't show
+  // up under Losses at all, that IS the signal it fully held.
+  function groupByLine(formatOne) {
+    return TROOP_ROLES.map(r => {
+      const items = TROOP_TYPES.filter(t => t.role === r.role).map(formatOne).filter(Boolean);
+      return items.length ? `${r.row} — ${items.join(', ')}` : null;
+    }).filter(Boolean);
+  }
+  function formatSentByLine(formation) {
+    return groupByLine(t => (formation[t.key] || 0) > 0 ? `${formation[t.key]} ${t.label}` : null);
+  }
+  function formatLossesByLine(losses) {
+    return groupByLine(t => {
+      const w = losses.wounded[t.key] || 0, k = losses.killed[t.key] || 0;
+      const parts = [];
+      if (w > 0) parts.push(`${w} wounded`);
+      if (k > 0) parts.push(`${k} killed`);
+      return parts.length ? `${parts.join(', ')} ${t.label}` : null;
+    });
+  }
   // Full expandable battle report: what was sent, the resolved outcome
   // band (+ ratio when it's known locally — real PvP doesn't return a
-  // numeric ratio today, only the band), then the existing per-troop-type
-  // loss breakdown. Matches real games' "Battle Details" — composition +
-  // outcome + losses, not just a loss summary.
+  // numeric ratio today, only the band), then losses — both grouped by
+  // Front/Mid/Back line (see applyFormationLosses' front-to-back draining)
+  // instead of one flat list. Matches real games' "Battle Details" —
+  // composition + outcome + losses, not just a loss summary.
   const BAND_LABELS = { decisive: 'Decisive win', solid: 'Solid win', costly: 'Costly loss', clear: 'Clear loss' };
   function buildBattleDetail(sent, losses, bandKey, ratio) {
     const lines = [];
-    const sentLines = formatFormationLines(sent);
-    if (sentLines.length) lines.push(`Sent: ${sentLines.join(', ')}`);
+    const sentLines = formatSentByLine(sent);
+    if (sentLines.length) { lines.push('Sent:'); lines.push(...sentLines); }
     if (bandKey) lines.push(`Result: ${BAND_LABELS[bandKey] || bandKey}${ratio != null ? ` (${ratio.toFixed(2)}x)` : ''}`);
-    const lossLines = formatLossDetail(losses);
-    lines.push(...(lossLines.length ? lossLines : ['No losses.']));
+    const lossLines = formatLossesByLine(losses);
+    lines.push('Losses:');
+    lines.push(...(lossLines.length ? lossLines : ['No losses — the front line held.']));
     return lines;
   }
   // for legacy call sites that just want "did this march take any losses" —

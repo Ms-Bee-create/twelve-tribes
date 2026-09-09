@@ -91,19 +91,26 @@ const DEFENDER_KILL_SHARE = 0.2;
 
 export interface LossBreakdown { killed: Record<string, number>; wounded: Record<string, number>; }
 
-// moves lossPct of each present tier in troops-object `defender` (proportionally)
-// from active into wounded (minus the killed share), in place, and returns a
-// real per-troop-type killed/wounded breakdown -- lets the defender's own
-// "while you were away" report be just as detailed as the attacker's,
-// mirroring the game file's own formatLossDetail().
+// Drains lossPct of the defender's TOTAL active troops as one shared pool,
+// front-to-back through TROOP_TYPES (Shieldbearer I-V -> Archer I-V ->
+// Rider I-V -- already role-then-ascending-tier ordered), not independently
+// per tier -- mirrors the game file's own applyFormationLosses (must stay
+// byte-for-byte equivalent, per this file's header) and Mafia City's real
+// formation layering: front-line roles absorb losses before back-line roles
+// of any tier. Returns a real per-troop-type killed/wounded breakdown --
+// lets the defender's own "while you were away" report be just as detailed
+// as the attacker's, mirroring the game file's own formatLossDetail().
 export function applyDefenderLosses(defender: TroopsObj, lossPct: number): LossBreakdown {
   const killed: Record<string, number> = {};
   const wounded: Record<string, number> = {};
+  const totalActive = TROOP_TYPES.reduce((sum, t) => sum + (defender[t.key]?.active ?? 0), 0);
+  let remainingHit = Math.min(totalActive, Math.round(totalActive * lossPct));
   TROOP_TYPES.forEach((t) => {
+    if (remainingHit <= 0) return;
     const pool = defender[t.key];
     if (!pool || pool.active <= 0) return;
-    const hit = Math.round(pool.active * lossPct);
-    if (hit <= 0) return;
+    const hit = Math.min(pool.active, remainingHit);
+    remainingHit -= hit;
     const k = Math.round(hit * DEFENDER_KILL_SHARE);
     const w = hit - k;
     pool.active -= hit;
