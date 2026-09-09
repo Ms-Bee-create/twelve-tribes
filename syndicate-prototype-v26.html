@@ -250,6 +250,24 @@
     0%, 100% { background: rgba(178,58,70,0); }
     50% { background: rgba(178,58,70,0.38); }
   }
+
+  /* world announcement banner — a Loudspeaker purchase pushes this to every
+     online player's screen (see subscribeLoudspeakerChannel) */
+  .loudspeaker-banner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 60;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 12px 20px;
+    background: linear-gradient(180deg, rgba(21,18,15,0.97), rgba(21,18,15,0.9));
+    border-bottom: 1px solid rgba(201,162,75,0.6);
+    color: var(--gold);
+    font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 14px;
+    text-align: center;
+    transform: translateY(-100%);
+    transition: transform 0.4s ease;
+    pointer-events: none;
+  }
+  .loudspeaker-banner.active { transform: translateY(0); }
+  body.reduce-motion .loudspeaker-banner { transition: none; }
   .enter-mansion-btn {
     font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 14px;
     border: 1px solid rgba(201,162,75,0.6);
@@ -1206,6 +1224,13 @@
       <div id="queueSlotList"></div>
       <div class="item-name" style="margin: 16px 0 8px;">Convenience</div>
       <div id="convenienceList"></div>
+      <div class="item-name" style="margin: 16px 0 8px;">Announcements</div>
+      <div class="item-card" id="loudspeakerCard" style="display:block;">
+        <div class="item-name">Loudspeaker</div>
+        <div class="item-meta" id="loudspeakerMeta" style="margin-bottom:8px;">Sign in to send a message across every online player's screen.</div>
+        <input type="text" id="loudspeakerInput" maxlength="120" placeholder="Your announcement" style="width:100%; box-sizing:border-box; margin-bottom:8px;">
+        <button class="gold-btn" id="loudspeakerSendBtn">Send — 200 Silver</button>
+      </div>
     </div>
 
     <div class="room-body theme-trial" id="room-trial" style="display:none">
@@ -1345,6 +1370,10 @@
 </div>
 
 <div class="raid-flash" id="raidFlash"></div>
+
+<div class="loudspeaker-banner" id="loudspeakerBanner">
+  <span>📢</span><span id="loudspeakerBannerText"></span>
+</div>
 
 <div class="chat-stripe" id="chatStripe" style="display:none">
   <span id="chatStripePreview">Tap to chat</span>
@@ -4986,6 +5015,76 @@
     if (e.key === 'Enter') { e.preventDefault(); sendChatMessage(); }
   });
 
+  // ---- Loudspeaker: 200 silver buys a real-time world announcement, same
+  // Realtime-push mechanism chat already uses (not the 25s poll cycle
+  // everything else relies on) since this needs to feel instant across
+  // every online player's screen, not just the sender's. No catch-up for
+  // players who were offline when it fired — an ephemeral announcement,
+  // not a persistent message, same "only reaches who's actually online
+  // right now" behavior real games' own world announcements have. ----
+  const LOUDSPEAKER_COST = 200;
+  let loudspeakerChannel = null;
+  let loudspeakerBannerTimeout = null;
+
+  function subscribeLoudspeakerChannel() {
+    if (loudspeakerChannel) return;
+    loudspeakerChannel = sb.channel('loudspeaker_messages_live')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'loudspeaker_messages' }, (payload) => {
+        showLoudspeakerBanner(payload.new);
+      })
+      .subscribe();
+  }
+  function unsubscribeLoudspeakerChannel() {
+    if (loudspeakerChannel) { sb.removeChannel(loudspeakerChannel); loudspeakerChannel = null; }
+  }
+  // textContent throughout, never innerHTML — same reasoning as chat/reports,
+  // this is broadcast to every online player so it's the single most
+  // user-controlled string with the widest reach anywhere in the game.
+  function showLoudspeakerBanner(row) {
+    const el = document.getElementById('loudspeakerBanner');
+    document.getElementById('loudspeakerBannerText').textContent = `${row.display_name}: ${row.text}`;
+    clearTimeout(loudspeakerBannerTimeout);
+    el.classList.add('active');
+    loudspeakerBannerTimeout = setTimeout(() => el.classList.remove('active'), 8000);
+  }
+  async function sendLoudspeakerMessage() {
+    const input = document.getElementById('loudspeakerInput');
+    const text = input.value.trim().slice(0, 120);
+    if (!text || !mpSession) return;
+    if (state.coins < LOUDSPEAKER_COST) { mapStatus.textContent = `Need ${LOUDSPEAKER_COST} silver to use the Loudspeaker.`; return; }
+    state.coins -= LOUDSPEAKER_COST;
+    input.value = '';
+    const { error } = await sb.from('loudspeaker_messages').insert({
+      sender_id: mpSession.user.id,
+      display_name: mpProfile?.display_name || 'Player',
+      text,
+    });
+    if (error) {
+      state.coins += LOUDSPEAKER_COST; // refund -- it never actually sent
+      mapStatus.textContent = 'Announcement failed to send — try again.';
+    } else {
+      addLog(`Sent an announcement: "${text}"`, 'win', 'system');
+    }
+    render();
+  }
+  document.getElementById('loudspeakerSendBtn').addEventListener('click', sendLoudspeakerMessage);
+  document.getElementById('loudspeakerInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); sendLoudspeakerMessage(); }
+  });
+  function renderLoudspeakerCard() {
+    const meta = document.getElementById('loudspeakerMeta');
+    const btn = document.getElementById('loudspeakerSendBtn');
+    const input = document.getElementById('loudspeakerInput');
+    if (!mpSession) {
+      meta.textContent = "Sign in to send a message across every online player's screen.";
+      btn.disabled = true; input.disabled = true;
+      return;
+    }
+    input.disabled = false;
+    meta.textContent = `Broadcasts instantly to every player online right now. Have ${state.coins.toFixed(0)} silver.`;
+    btn.disabled = state.coins < LOUDSPEAKER_COST;
+  }
+
   function advanceSelection(dispatchedId) {
     const n = heroes.length;
     const startIdx = heroes.findIndex(h => h.id === dispatchedId);
@@ -6885,6 +6984,8 @@
     });
     recallCard.appendChild(recallBtn);
     convenienceList.appendChild(recallCard);
+
+    renderLoudspeakerCard();
   }
 
   function applyReduceMotionSetting() {
@@ -8594,6 +8695,7 @@
     loadChatHistory();
     subscribeChatChannel();
     updateChatStripe();
+    subscribeLoudspeakerChannel();
   }
 
   async function mpPullCityControl() {

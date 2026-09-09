@@ -237,3 +237,29 @@ create policy "players can only send as themselves"
   with check (auth.uid() = sender_id);
 
 alter publication supabase_realtime add table chat_messages;
+
+-- The Loudspeaker (Market item, 200 silver): broadcasts a message across
+-- every online player's screen in real time. Same shape/RLS/Realtime
+-- treatment as chat_messages -- deliberately ephemeral, no catch-up path,
+-- only players actually online when it fires see it.
+create table loudspeaker_messages (
+  id bigint generated always as identity primary key,
+  sender_id uuid not null references players(id) on delete cascade,
+  display_name text not null,
+  text text not null check (char_length(text) between 1 and 120),
+  created_at timestamptz not null default now()
+);
+
+alter table loudspeaker_messages enable row level security;
+
+create policy "loudspeaker messages are readable by any signed-in player"
+  on loudspeaker_messages for select
+  to authenticated
+  using (true);
+
+create policy "players can only send loudspeaker messages as themselves"
+  on loudspeaker_messages for insert
+  to authenticated
+  with check (auth.uid() = sender_id);
+
+alter publication supabase_realtime add table loudspeaker_messages;
