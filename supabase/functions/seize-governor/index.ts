@@ -85,7 +85,9 @@ Deno.serve(async (req) => {
     }
 
     const heroLevel = Math.max(1, ...(attacker.hero_levels && attacker.hero_levels.length ? attacker.hero_levels : [1]));
-    const attackPower = effectiveAttack(formation, defenseComposition) * heroSkillMultiplier(heroLevel, attacker.level || 1);
+    // heroMult buffs each troop's own attack stat directly (see effectiveAttack) --
+    // scoped to exactly the formation sent, never the attacker's whole stockpile.
+    const attackPower = effectiveAttack(formation, defenseComposition, heroSkillMultiplier(heroLevel, attacker.level || 1));
     const ratio = defensePower > 0 ? attackPower / defensePower : (attackPower > 0 ? 99 : 0);
     const result = resolveCombatBand(ratio);
 

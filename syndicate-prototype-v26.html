@@ -1967,20 +1967,30 @@
     { role: 'gunner',   label: 'Archer',       row: 'Mid line' },
     { role: 'driver',   label: 'Rider',        row: 'Back line' },
   ];
+  // Soft exponential (saturating) curve: tierMult(1) = 1.0 and each further
+  // tier closes most of the remaining gap to TIER_CEIL rather than adding a
+  // fixed/growing chunk (old table: 1, 2, 3.5, 5, 7, 9.5 -- a Tier 6 stack
+  // hit ~9.5x a same-size Tier 1 stack). MUST stay byte-for-byte equivalent
+  // to softTierMult() in supabase/functions/_shared/game-math.ts.
+  const TIER_CEIL = 7.5;
+  const TIER_CURVE_K = 0.35;
+  function softTierMult(tier) {
+    return 1 + (TIER_CEIL - 1) * (1 - Math.exp(-TIER_CURVE_K * (tier - 1)));
+  }
   const TROOP_TYPES = (() => {
     const tiers = [
-      { tier: 1, roman: 'I',   tierMult: 1.0, unlockMansion: 1 },
-      { tier: 2, roman: 'II',  tierMult: 2.0, unlockMansion: 3 },
-      { tier: 3, roman: 'III', tierMult: 3.5, unlockMansion: 6 },
-      { tier: 4, roman: 'IV',  tierMult: 5.0, unlockMansion: 12 },
-      { tier: 5, roman: 'V',   tierMult: 7.0, unlockMansion: 20 },
-      { tier: 6, roman: 'VI',  tierMult: 9.5, unlockMansion: 28 },
+      { tier: 1, roman: 'I',   unlockMansion: 1 },
+      { tier: 2, roman: 'II',  unlockMansion: 3 },
+      { tier: 3, roman: 'III', unlockMansion: 6 },
+      { tier: 4, roman: 'IV',  unlockMansion: 12 },
+      { tier: 5, roman: 'V',   unlockMansion: 20 },
+      { tier: 6, roman: 'VI',  unlockMansion: 28 },
     ];
     const list = [];
     TROOP_ROLES.forEach(r => tiers.forEach(t => list.push({
       key: r.role + t.tier, role: r.role, tier: t.tier, roman: t.roman,
       label: `${r.label} ${t.roman}`, row: r.row, desc: ROLE_DESC[r.role],
-      tierMult: t.tierMult, unlockMansion: t.unlockMansion,
+      tierMult: softTierMult(t.tier), unlockMansion: t.unlockMansion,
     })));
     return list;
   })();
@@ -2013,11 +2023,17 @@
     TROOP_TYPES.forEach(t => { state.troopTypes[t.key].active += (formation[t.key] || 0); });
   }
 
-  // counter multiplier for one attacking role vs one defending role
+  // Counter Triangle tuning: a straight 1.5x/0.65x swing (a 2.3x spread
+  // between winning and losing the matchup) let a big enough advantaged
+  // stack ignore tier and raw numbers entirely. Flattened to a clean +/-20%
+  // modifier (within the intended 15-30% band) -- advantage still matters,
+  // but it's a nudge on top of tier/numbers, not the deciding factor alone.
+  // MUST stay byte-for-byte equivalent to counterMultiplier() in game-math.ts.
+  const COUNTER_BONUS = 0.2;
   function counterMultiplier(attackRole, defendRole) {
     if (attackRole === defendRole) return 1.0;
-    if (COUNTERS[attackRole] === defendRole) return 1.5; // attacker counters defender
-    return 0.65; // defender counters attacker
+    if (COUNTERS[attackRole] === defendRole) return 1 + COUNTER_BONUS; // attacker counters defender
+    return 1 - COUNTER_BONUS; // defender counters attacker
   }
   // what fraction of a troops-object (active counts keyed by tier) belongs
   // to each role — the "what is this base actually leaning on" read
@@ -2041,12 +2057,19 @@
   }
   // what the SENT formation can actually do against a specific opponent's
   // composition (or a neutral 1.0x multiplier if the opponent is unknown)
-  function effectiveAttack(formation, opponentComposition) {
+  // heroMult (from heroSkillMultiplier) is applied per-troop, right alongside
+  // tierMult/ROLE_ATTACK -- i.e. it's baked into each individual unit's own
+  // attack stat, not tacked on afterward as a separate multiply against the
+  // march's total. Same number for a single march (multiplication distributes
+  // over the sum either way), but it means the buff can never accidentally
+  // get applied twice, or against a pool of troops wider than the formation
+  // actually sent. MUST stay byte-for-byte equivalent to game-math.ts.
+  function effectiveAttack(formation, opponentComposition, heroMult = 1) {
     const proportions = roleProportions(opponentComposition);
     return TROOP_TYPES.reduce((sum, t) => {
       const sent = formation[t.key] || 0;
       if (!sent) return sum;
-      return sum + sent * t.tierMult * ROLE_ATTACK[t.role] * weightedCounterMultiplier(t.role, proportions);
+      return sum + sent * t.tierMult * ROLE_ATTACK[t.role] * weightedCounterMultiplier(t.role, proportions) * heroMult;
     }, 0);
   }
   // what a standing garrison (real troops-object) can absorb
@@ -2070,7 +2093,12 @@
   // raw formation strength with no specific opponent in mind (display use —
   // e.g. "attack power" before you've picked a target) — neutral 1.0x counter
   function heroPowerWithFormation(hero, formation, opponentComposition) {
-    return Math.round((12 + heroGearBonus(hero, 'blade') + effectiveAttack(formation, opponentComposition)) * heroSkillMultiplier(hero));
+    const heroBase = 12 + heroGearBonus(hero, 'blade');
+    // Hero's own isolated stat scales by hero skill on its own; troops in
+    // the march get that same % as a per-unit buff via effectiveAttack's
+    // heroMult param, instead of both being lumped together and re-scaled
+    // as one combined value (see effectiveAttack's own comment).
+    return Math.round(heroBase * heroSkillMultiplier(hero) + effectiveAttack(formation, opponentComposition, heroSkillMultiplier(hero)));
   }
   // A hero's OWN power — level, gear, skill — with no troop count in it at
   // all. This used to run the player's entire home army (activeTroopsFormation,
@@ -5198,7 +5226,7 @@
     if (!target) return 0;
     const power = rivalPower(target);
     if (!power) return 0;
-    return (effectiveAttack(activeTroopsFormation(), rivalComposition(target)) * heroSkillMultiplier(hero)) / power;
+    return effectiveAttack(activeTroopsFormation(), rivalComposition(target), heroSkillMultiplier(hero)) / power;
   }
 
   function sendHeroToRaid(hero, rb, formation) {
@@ -5758,7 +5786,7 @@
     const power = heroPowerWithFormation(formationCurrentHero, formationValues, compositionForPower);
     let text = `Attack power for this march: ${power}`;
     if (formationOddsTarget && rivalPower(formationOddsTarget)) {
-      const ratio = (effectiveAttack(formationValues, rivalComposition(formationOddsTarget)) * heroSkillMultiplier(formationCurrentHero)) / rivalPower(formationOddsTarget);
+      const ratio = effectiveAttack(formationValues, rivalComposition(formationOddsTarget), heroSkillMultiplier(formationCurrentHero)) / rivalPower(formationOddsTarget);
       text += ` · ${combatBandLabel(ratio)} (${ratio.toFixed(2)}x)`;
       // Her ask: show what's actually known about the opponent's troops.
       // Every target reachable here (rival base, Boss Mansion, City Gate,
