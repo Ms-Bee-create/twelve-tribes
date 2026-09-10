@@ -3881,19 +3881,145 @@
     ctx.restore();
   }
 
+  // Mission-type color coding for march lines: crimson for anything
+  // aggressive (attack/raid/seize/pvp/scout), harvest green for resource
+  // gathering, warm amber/gold for a march heading home or a heroless
+  // reinforcement column (same 'return'-shaped kind either way).
+  function marchLineColor(kind) {
+    if (kind === 'farm') return '#2ecc6a';
+    if (kind === 'return' || kind === 'scout') return '#e0a83d';
+    return '#dc3545';
+  }
+  let marchDashPhase = 0; // advanced once per drawn frame -- drives the flowing-dash animation
+
   function drawHeroTrail(hero) {
-    // a thin breadcrumb line from home to wherever a hero currently is —
-    // only while they're actually out, so it doesn't clutter the whole map
-    if (hero.state === 'idle') return;
+    // The dashed march line only makes sense while someone is actually
+    // walking it -- once they've arrived (fighting, farming, garrisoned,
+    // resolving) they're standing at a fixed point, not mid-route, so the
+    // line disappears; it reappears on its own the moment advanceMarch()
+    // flips them back to 'walking' (e.g. the trip home).
+    if (hero.state === 'walking') {
+      const kind = hero.march ? hero.march.kind : null;
+      ctx.save();
+      ctx.strokeStyle = kind ? marchLineColor(kind) : hero.style.trim;
+      ctx.globalAlpha = 0.65;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([7, 5]);
+      // negative offset makes the dash pattern crawl from home toward the
+      // hero (i.e. forward along the march) rather than backward
+      ctx.lineDashOffset = -marchDashPhase;
+      ctx.beginPath();
+      ctx.moveTo(BASE.x, BASE.y);
+      ctx.lineTo(hero.x, hero.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if (hero.state !== 'idle') drawPlatoon(hero);
+  }
+
+  // Small vector shapes trailing behind and beside the hero sprite, standing
+  // in for the actual troops in the march -- shaped to match each role's
+  // name instead of generic dots: a shield for Shieldbearers (enforcer), a
+  // drawn bow for Archers (gunner), a lance-tipped chevron for Riders
+  // (driver). Size/density of the cluster scales with how many troops are
+  // actually in the formation, log-scaled so a 50-troop and 5000-troop march
+  // both read clearly instead of the latter drowning the sprite in shapes.
+  const PLATOON_ROLE_COLOR = { enforcer: '#8a97a8', gunner: '#c9a24b', driver: '#7fb0c9' };
+
+  // Draws one troop's shape at (x,y), facing `angle` (radians, 0 = pointing
+  // along +x) and scaled by `size`. Shapes are small, simple silhouettes --
+  // legible at map scale rather than literal icon detail.
+  function drawPlatoonUnit(role, x, y, angle, size) {
     ctx.save();
-    ctx.strokeStyle = hero.style.trim;
-    ctx.globalAlpha = 0.55;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 5]);
-    ctx.beginPath();
-    ctx.moveTo(BASE.x, BASE.y);
-    ctx.lineTo(hero.x, hero.y);
-    ctx.stroke();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.fillStyle = PLATOON_ROLE_COLOR[role];
+    ctx.strokeStyle = PLATOON_ROLE_COLOR[role];
+    if (role === 'enforcer') {
+      // Shieldbearer -- a small rounded-bottom shield, held facing forward
+      ctx.beginPath();
+      ctx.moveTo(0, -size);
+      ctx.quadraticCurveTo(size, -size * 0.7, size * 0.85, size * 0.15);
+      ctx.quadraticCurveTo(size * 0.5, size * 1.15, 0, size * 1.4);
+      ctx.quadraticCurveTo(-size * 0.5, size * 1.15, -size * 0.85, size * 0.15);
+      ctx.quadraticCurveTo(-size, -size * 0.7, 0, -size);
+      ctx.closePath();
+      ctx.fill();
+    } else if (role === 'gunner') {
+      // Archer -- a drawn bow (curved stave + string) with a nocked arrow
+      ctx.lineWidth = Math.max(0.5, size * 0.28);
+      ctx.beginPath();
+      ctx.arc(0, 0, size, Math.PI * 0.35, Math.PI * 1.65);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(size * Math.cos(Math.PI * 0.35), size * Math.sin(Math.PI * 0.35));
+      ctx.lineTo(0, 0);
+      ctx.lineTo(size * Math.cos(Math.PI * 1.65), size * Math.sin(Math.PI * 1.65));
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-size * 1.1, 0); ctx.lineTo(size * 0.9, 0);
+      ctx.stroke();
+    } else {
+      // Rider -- a forward chevron body with a trailing lance line
+      ctx.beginPath();
+      ctx.moveTo(size * 1.1, 0);
+      ctx.lineTo(-size * 0.6, -size * 0.75);
+      ctx.lineTo(-size * 0.15, 0);
+      ctx.lineTo(-size * 0.6, size * 0.75);
+      ctx.closePath();
+      ctx.fill();
+      ctx.lineWidth = Math.max(0.5, size * 0.22);
+      ctx.beginPath();
+      ctx.moveTo(-size * 0.15, 0); ctx.lineTo(-size * 1.6, 0);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawPlatoon(hero) {
+    const m = hero.march;
+    if (!m || !m.formation) return;
+    const counts = { enforcer: 0, gunner: 0, driver: 0 };
+    let total = 0;
+    TROOP_TYPES.forEach(t => {
+      const n = m.formation[t.key] || 0;
+      if (n > 0) { counts[t.role] += n; total += n; }
+    });
+    if (total <= 0) return;
+
+    // direction of travel: forward = the way the hero is actually heading,
+    // back = behind them (where the platoon trails) -- while stationary
+    // (fighting/farming) this falls back to "facing away from home" so the
+    // formation doesn't just vanish/flatten once the march line disappears
+    const dx = hero.x - m.fromX, dy = hero.y - m.fromY;
+    const dist = Math.hypot(dx, dy) || 1;
+    const fwdX = dx / dist, fwdY = dy / dist;
+    const backX = -fwdX, backY = -fwdY;
+    const sideX = -backY, sideY = backX;
+    const facing = Math.atan2(fwdY, fwdX);
+
+    // density scales with troop count (log-scaled -- a 20-troop reinforcement
+    // and a 20,000-troop army both stay legible), capped so the cluster never
+    // overwhelms the sprite
+    const unitCount = Math.max(3, Math.min(14, Math.round(Math.log2(total + 1) * 1.8)));
+    const unitSize = Math.max(1.3, Math.min(2.8, 1.3 + Math.log10(total + 1) * 0.55));
+
+    const roles = ['enforcer', 'gunner', 'driver'].filter(r => counts[r] > 0);
+
+    ctx.save();
+    for (let i = 0; i < unitCount; i++) {
+      const role = roles[i % roles.length];
+      // stagger into two ragged trailing ranks rather than one straight file
+      const rank = Math.floor(i / roles.length) + 1;
+      const jitter = (Math.sin(i * 12.9898) * 0.5); // deterministic per-index wobble
+      const along = 6 + rank * 4.5;
+      const across = (jitter + (i % 2 === 0 ? 1 : -1)) * (3 + rank * 0.8);
+      const px = hero.x + backX * along + sideX * across;
+      const py = hero.y + backY * along + sideY * across;
+      ctx.globalAlpha = 0.9 - rank * 0.12;
+      drawPlatoonUnit(role, px, py, facing, unitSize);
+    }
     ctx.restore();
   }
 
@@ -4050,6 +4176,7 @@
     ctx.translate(-camera.x, -camera.y);
 
     // (tracer lines to each target removed by request)
+    marchDashPhase = (marchDashPhase + 0.5) % 1000;
     heroes.forEach(drawHeroTrail);
     extraMarches.forEach(drawHeroTrail);
     scoutMarches.forEach(drawHeroTrail);
