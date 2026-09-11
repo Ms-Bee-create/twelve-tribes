@@ -1514,14 +1514,47 @@
   // Custom Canva art overhaul: real portrait sprites for the 3 named heroes
   // (index-matched to HERO_NAMES/HERO_STYLES above -- Vega=Vanguard,
   // Marlowe=Archer, Ruiz=Heavy Shield Guardian) and 6 level-gated camp tier
-  // images. Loaded once up front; every draw call checks `.complete &&
-  // naturalWidth` before using an image so a slow/missing load falls back
-  // to the existing procedural drawing instead of a broken canvas paint.
-  function loadImg(src) { const img = new Image(); img.src = src; return img; }
+  // images.
+  //
+  // The free Canva export these came from has no alpha channel -- every
+  // asset sits on a flat white card. Rather than eat that as a white box on
+  // the desert map, each image is decoded once into an offscreen canvas and
+  // has its near-white pixels punched to fully transparent there (once, on
+  // load -- not per frame). "Near-white" (>=250 per channel) rather than an
+  // exact 255,255,255 match because the two JPEGs (hero1.jpg, camp_t3.jpg)
+  // never hold a perfectly pure white after lossy compression.
+  const WHITE_STRIP_THRESHOLD = 250;
+  function stripWhiteBackground(img) {
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const cctx = c.getContext('2d');
+    cctx.drawImage(img, 0, 0);
+    const frame = cctx.getImageData(0, 0, c.width, c.height);
+    const px = frame.data;
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i] >= WHITE_STRIP_THRESHOLD && px[i + 1] >= WHITE_STRIP_THRESHOLD && px[i + 2] >= WHITE_STRIP_THRESHOLD) {
+        px[i + 3] = 0;
+      }
+    }
+    cctx.putImageData(frame, 0, 0);
+    return c;
+  }
+  // Returns a { ready, canvas } handle: `ready` flips true once the source
+  // image has loaded AND been run through stripWhiteBackground -- every draw
+  // call checks it before using the canvas, so a slow/missing load falls
+  // back to the existing procedural drawing instead of a broken paint.
+  function loadImg(src) {
+    const handle = { ready: false, canvas: null };
+    const img = new Image();
+    img.onload = () => { handle.canvas = stripWhiteBackground(img); handle.ready = true; };
+    img.src = src;
+    return handle;
+  }
   const HERO_SPRITES = ['assets/hero1.jpg', 'assets/hero2.png', 'assets/hero3.png'].map(loadImg);
   function heroSpriteImage(hero) {
-    const img = HERO_SPRITES[hero.id];
-    return (img && img.complete && img.naturalWidth) ? img : null;
+    const handle = HERO_SPRITES[hero.id];
+    return (handle && handle.ready) ? handle.canvas : null;
   }
   const CAMP_TIER_IMAGES = [
     'assets/camp_t1.png', 'assets/camp_t2.png', 'assets/camp_t3.jpg',
@@ -1536,8 +1569,8 @@
     return 5;
   }
   function campTierImage(lvl) {
-    const img = CAMP_TIER_IMAGES[campTierForLevel(lvl)];
-    return (img && img.complete && img.naturalWidth) ? img : null;
+    const handle = CAMP_TIER_IMAGES[campTierForLevel(lvl)];
+    return (handle && handle.ready) ? handle.canvas : null;
   }
 
   const targets = [
@@ -3478,7 +3511,7 @@
     // loading or if it 404s, same pattern as heroSpriteImage).
     const tierImg = campTierImage(lvl);
     if (tierImg) {
-      const w = 96, h = w * (tierImg.naturalHeight / tierImg.naturalWidth);
+      const w = 96, h = w * (tierImg.height / tierImg.width);
       ctx.drawImage(tierImg, x - w / 2, y - h + 18, w, h);
       return;
     }
@@ -3847,7 +3880,7 @@
         ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(x, y - 6, 15, 0, Math.PI * 2); ctx.stroke();
       }
-      const w = 22, h = w * (portrait.naturalHeight / portrait.naturalWidth);
+      const w = 22, h = w * (portrait.height / portrait.width);
       ctx.globalAlpha = hero.state === 'farming' ? 0.75 : 1;
       ctx.drawImage(portrait, x - w / 2, y - h + 8, w, h);
       ctx.restore();
