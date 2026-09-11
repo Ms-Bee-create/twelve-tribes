@@ -1506,6 +1506,35 @@
   ];
   const MAX_HEROES = 3;
 
+  // Custom Canva art overhaul: real portrait sprites for the 3 named heroes
+  // (index-matched to HERO_NAMES/HERO_STYLES above -- Vega=Vanguard,
+  // Marlowe=Archer, Ruiz=Heavy Shield Guardian) and 6 level-gated camp tier
+  // images. Loaded once up front; every draw call checks `.complete &&
+  // naturalWidth` before using an image so a slow/missing load falls back
+  // to the existing procedural drawing instead of a broken canvas paint.
+  function loadImg(src) { const img = new Image(); img.src = src; return img; }
+  const HERO_SPRITES = ['assets/hero1.jpg', 'assets/hero2.png', 'assets/hero3.png'].map(loadImg);
+  function heroSpriteImage(hero) {
+    const img = HERO_SPRITES[hero.id];
+    return (img && img.complete && img.naturalWidth) ? img : null;
+  }
+  const CAMP_TIER_IMAGES = [
+    'assets/camp_t1.png', 'assets/camp_t2.png', 'assets/camp_t3.jpg',
+    'assets/camp_t4.png', 'assets/camp_t5.png', 'assets/camp_t6.png',
+  ].map(loadImg);
+  function campTierForLevel(lvl) {
+    if (lvl <= 5) return 0;
+    if (lvl <= 12) return 1;
+    if (lvl <= 19) return 2;
+    if (lvl <= 27) return 3;
+    if (lvl <= 49) return 4;
+    return 5;
+  }
+  function campTierImage(lvl) {
+    const img = CAMP_TIER_IMAGES[campTierForLevel(lvl)];
+    return (img && img.complete && img.naturalWidth) ? img : null;
+  }
+
   const targets = [
     { name: "Desert Marauders",   x: 150, y: 600, cost: 15, maxHealth: 30,  coinPerHp: 0.6, xpKill: 16,  color: '#7a8a6b', respawnMs: 4000,  icon: 'claws',  region: { x1: 50,  y1: 375, x2: 450,  y2: 900 }, composition: { enforcer: 0.15, gunner: 0.25, driver: 0.60 } },
     { name: "Amalekite Raiders",  x: 500, y: 600, cost: 18, maxHealth: 70,  coinPerHp: 0.7, xpKill: 34,  color: '#8f7a4b', respawnMs: 6000,  icon: 'fist',   region: { x1: 350, y1: 375, x2: 850,  y2: 1050 }, composition: { enforcer: 0.60, gunner: 0.25, driver: 0.15 } },
@@ -3429,12 +3458,25 @@
   }
 
   function drawMansion() {
+    // Son's account keeps its own dedicated visual (a leveling gaming PC
+    // rig, not a camp at all) -- absolute priority, checked first, never
+    // touched by the standard 6-tier camp art below.
     if (isSonAccount()) {
       drawComputerMansion(BASE.x, BASE.y, state.mansionLevel);
       return;
     }
     const lvl = state.mansionLevel;
     const x = BASE.x, y = BASE.y;
+
+    // Standard accounts: real camp art gated by Mansion level, once loaded
+    // (falls back to the procedural camp below while the image is still
+    // loading or if it 404s, same pattern as heroSpriteImage).
+    const tierImg = campTierImage(lvl);
+    if (tierImg) {
+      const w = 96, h = w * (tierImg.naturalHeight / tierImg.naturalWidth);
+      ctx.drawImage(tierImg, x - w / 2, y - h + 18, w, h);
+      return;
+    }
 
     const centerW = 40 + lvl * 3, centerH = 26 + lvl * 2;
     const wingW = 20 + lvl * 1.6, wingH = centerH * 0.62;
@@ -3788,6 +3830,31 @@
     const x = hero.x, y = hero.y;
     const walking = hero.state === 'walking';
     if (walking) hero.walkPhase += 0.25;
+
+    // Real portrait art for the 3 named chieftains (reinforcement/scout
+    // columns have string ids like 'reinf1', so this array lookup naturally
+    // misses them and they keep the procedural stick-figure below).
+    const portrait = heroSpriteImage(hero);
+    if (portrait) {
+      ctx.save();
+      if (hero.id === selectedId) {
+        ctx.strokeStyle = 'rgba(201,162,75,0.7)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(x, y - 6, 15, 0, Math.PI * 2); ctx.stroke();
+      }
+      const w = 22, h = w * (portrait.naturalHeight / portrait.naturalWidth);
+      ctx.globalAlpha = hero.state === 'farming' ? 0.75 : 1;
+      ctx.drawImage(portrait, x - w / 2, y - h + 8, w, h);
+      ctx.restore();
+      if (showLabels) {
+        ctx.fillStyle = '#b8afa0';
+        ctx.font = '500 9px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(hero.name, x, y + 22);
+      }
+      return;
+    }
+
     const legSwing = walking ? Math.sin(hero.walkPhase) * 5 : 0;
     const style = hero.style;
 
