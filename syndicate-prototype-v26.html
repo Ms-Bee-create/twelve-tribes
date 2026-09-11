@@ -9,8 +9,8 @@
      cannot register at all from a plain file:// path, which is also why
      Supabase's session persistence can look unreliable there. -->
 <link rel="manifest" href="manifest.json">
-<link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="icon" href="assets/app_logo.png" type="image/png">
+<link rel="apple-touch-icon" href="assets/app_logo.png">
 <meta name="theme-color" content="#191510">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -440,9 +440,13 @@
     border: 1px solid rgba(201,162,75,0.4);
     padding: 26px 22px;
   }
+  .auth-logo {
+    display: block; width: 72px; height: 72px; margin: 0 auto 14px;
+    border-radius: 16px;
+  }
   .auth-title {
     font-family: 'Cormorant Garamond', serif; font-size: 26px; font-weight: 600;
-    color: var(--gold); margin-bottom: 6px;
+    color: var(--gold); margin-bottom: 6px; text-align: center;
   }
   .auth-sub { font-size: 12px; color: var(--paper-dim); margin-bottom: 18px; line-height: 1.5; }
   .auth-field { margin-bottom: 12px; }
@@ -712,6 +716,7 @@
 
 <div class="auth-gate" id="authGate">
   <div class="auth-panel">
+    <img class="auth-logo" src="assets/app_logo.png" alt="Twelve Tribes">
     <div class="auth-title">Twelve Tribes</div>
     <div class="auth-sub" id="authSub">Sign in to see the shared city and raid real players. Your solo progress on this device stays exactly as it is either way.</div>
 
