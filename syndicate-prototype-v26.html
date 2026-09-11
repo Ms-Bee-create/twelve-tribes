@@ -2659,9 +2659,13 @@
   // (marches were resolving too fast) -- the 0.5x applies to the whole
   // total, base speed included, not just the buyable/level portion.
   function speedBoostActive() { return state.speedBoostEndsAt && performance.now() < state.speedBoostEndsAt; }
+  // Forced March research (see RESEARCH_ITEMS) is the one LASTING speed
+  // gain left now that Sandals' buy expires -- applied as a flat multiplier
+  // on top of everything else, same pattern researchBonusPct feeds into
+  // elsewhere (train speed, build speed, etc).
   function speedPxPerSec() {
     const levelBonus = speedBoostActive() ? (state.speedLevel - 1) * 45 : 0;
-    return (70 + levelBonus + driverSpeedBonus()) * 0.5;
+    return (70 + levelBonus + driverSpeedBonus()) * 0.5 * (1 + researchBonusPct('march_speed'));
   }
   function speedUpgradeCost() { return 150 * state.speedLevel; }
 
@@ -3013,6 +3017,28 @@
         });
       }
     });
+    // Forced March: a permanent march-speed bonus, deliberately harder to
+    // reach than the shared economy/arms techs above -- Sandals' own speed
+    // buy was just capped to a 24h temporary window (see speedPxPerSec), so
+    // this is the one path left to a LASTING speed gain, and it's priced
+    // like it: gated 20 lab levels ahead of its own project level (an
+    // ordinary tech unlocks 1:1 with the lab), capped at a modest 30% total
+    // instead of the shared curve's 80%, and costs roughly double the
+    // shared curve's resources per level on top of a slower time curve.
+    for (let level = 1; level <= MAX_LEVEL; level++) {
+      const costL = Math.pow(level, RESOURCE_COST_EXPONENT);
+      list.push({
+        key: 'march_speed', category: 'Crew', label: 'Forced March',
+        desc: 'Permanently raises march speed for every deployment -- a slow, expensive climb, well below what a Sandals buy gives while it lasts.',
+        // clamped at MAX_LEVEL so a maxed Scribes' Tent can still eventually
+        // reach every level here -- the +20 gap just means it front-loads
+        // the difficulty instead of leaving the top of the line unreachable
+        level, unlockLab: Math.min(MAX_LEVEL, level + 20),
+        bonusPct: Math.min(0.30, level * 0.003),
+        ms: Math.round(600000 * Math.pow(level, 1.6)),
+        resourceCost: { lumber: Math.round(10 * costL), food: Math.round(8 * costL), water: Math.round(4 * costL) },
+      });
+    }
     // Logistics Corps: a discrete capability, not a percentage bonus, so it
     // gets its own short level range instead of the shared 100 — each level
     // is a real milestone (+1 whole deployment slot), not a small tick, so
