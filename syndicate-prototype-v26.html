@@ -3865,6 +3865,15 @@
   }
 
   function drawHeroSprite(hero) {
+    // A hero sitting idle at home is still parked directly on the camp
+    // image now that the camp renders as real art -- reads as clutter, not
+    // "your chieftain." They only appear on the map once actually sent out
+    // (walking/fighting/farming/garrisoned), same as stepping outside the
+    // tent to march. Idle heroes stay fully clickable/recallable via
+    // handleMapTap, which hit-tests hero.x/y directly and never looks at
+    // whether anything was actually drawn there.
+    if (hero.state === 'idle') return;
+
     const x = hero.x, y = hero.y;
     const walking = hero.state === 'walking';
     if (walking) hero.walkPhase += 0.25;
@@ -3878,11 +3887,11 @@
       if (hero.id === selectedId) {
         ctx.strokeStyle = 'rgba(201,162,75,0.7)';
         ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(x, y - 6, 15, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(x, y - 9, 22, 0, Math.PI * 2); ctx.stroke();
       }
-      const w = 22, h = w * (portrait.height / portrait.width);
+      const w = 34, h = w * (portrait.height / portrait.width);
       ctx.globalAlpha = hero.state === 'farming' ? 0.75 : 1;
-      ctx.drawImage(portrait, x - w / 2, y - h + 8, w, h);
+      ctx.drawImage(portrait, x - w / 2, y - h + 10, w, h);
       ctx.restore();
       if (showLabels) {
         ctx.fillStyle = '#b8afa0';
@@ -3898,6 +3907,7 @@
 
     ctx.save();
     ctx.translate(x, y);
+    ctx.scale(1.5, 1.5); // matches the bigger portrait art above for heroes still on the procedural fallback
 
     if (hero.id === selectedId) {
       ctx.strokeStyle = 'rgba(201,162,75,0.7)';
