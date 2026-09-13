@@ -465,6 +465,40 @@
   .auth-switch { font-size: 12px; color: var(--paper-dim); margin-top: 14px; text-align: center; }
   .auth-switch a { color: var(--gold); text-decoration: underline; cursor: pointer; }
 
+  /* ---- startup patch-notes announcement ---- */
+  .announce-overlay {
+    position: fixed; inset: 0;
+    background: rgba(10,8,6,0.82);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 60;
+    padding: 20px; box-sizing: border-box;
+  }
+  .announce-overlay.open { display: flex; }
+  .announce-panel {
+    position: relative;
+    width: 100%; max-width: 480px; max-height: 84vh;
+    overflow-y: auto;
+    background: linear-gradient(180deg, #1c1815, #171310);
+    border: 1px solid rgba(201,162,75,0.4);
+    padding: 26px 22px;
+    font-size: 13px; line-height: 1.6; color: var(--paper);
+  }
+  .announce-close {
+    position: absolute; top: 10px; right: 10px;
+    background: none; border: none; color: var(--paper-dim);
+    font-size: 20px; line-height: 1; padding: 6px 10px; cursor: pointer;
+  }
+  .announce-close:hover { color: var(--paper); }
+  .announce-panel h2 {
+    font-family: 'Cormorant Garamond', serif; font-size: 20px; font-weight: 600;
+    color: var(--gold); margin: 0 18px 12px 0;
+  }
+  .announce-panel h3 { font-size: 13px; color: var(--gold); margin: 16px 0 6px; }
+  .announce-panel ul { margin: 6px 0 12px; padding-left: 20px; }
+  .announce-panel li { margin-bottom: 6px; }
+  .announce-panel strong { color: var(--gold); }
+
   /* ---- Mansion interior modal ---- */
   .modal-backdrop {
     position: fixed; inset: 0;
@@ -737,6 +771,37 @@
     <button class="gold-btn" id="authSubmitBtn">Sign In</button>
 
     <div class="auth-switch">Only invited players can sign in.<br><a id="authSkipLink">Skip — just play solo on this device</a></div>
+  </div>
+</div>
+
+<div class="announce-overlay" id="announceOverlay">
+  <div class="announce-panel">
+    <button class="announce-close" id="announceCloseBtn" aria-label="Close">×</button>
+    <h2>📢 THE TWELVE TRIBES: AGE OF STRATEGY UPDATE 📢</h2>
+    <p>Chiefs, a massive overhaul has arrived for your Troop Training Grounds! Troops are no longer simple linear stat upgrades. Starting today, every Tier you train alternates between a specialized Offensive Lineage and a Defensive Lineage!</p>
+    <p>To conquer the realm, you must now mix and match your tiers to form the ultimate balanced army.</p>
+    <h3>📊 THE ALTERNATING TIER BLUEPRINT</h3>
+    <ul>
+      <li><strong>ODD TIERS (T1, T3, T5):</strong> Optimized for high raw Attack and aggressive breakthrough skills.</li>
+      <li><strong>EVEN TIERS (T2, T4, T6):</strong> Optimized for massive Defense, counter-play, and army protection.</li>
+    </ul>
+    <h3>⚔️ NEW TROOP SIGNATURE SKILLS</h3>
+    <p><strong>1. SHIELDBEARER (Enforcers)</strong></p>
+    <ul>
+      <li>T1, T3, T5 - <strong>[Shield Bash]</strong>: Deals +15% damage against enemy Shieldbearers to break their frontline.</li>
+      <li>T2, T4, T6 - <strong>[Iron Wall]</strong>: Grants a flat +15% damage reduction to the entire troop stack.</li>
+    </ul>
+    <p><strong>2. ARCHER (Gunners)</strong></p>
+    <ul>
+      <li>T1, T3, T5 - <strong>[Double Shot]</strong>: Unleashes rapid fire, granting +20% raw damage against the frontline.</li>
+      <li>T2, T4, T6 - <strong>[Eagle Eye]</strong>: Pierces enemy ranks, lowering total opponent defense by 10% to strike deep.</li>
+    </ul>
+    <p><strong>3. RIDER (Drivers)</strong></p>
+    <ul>
+      <li>T1, T3, T5 - <strong>[Flank Charge]</strong>: Blitzes the enemy, granting a massive +30% attack multiplier on Round 1.</li>
+      <li>T2, T4, T6 - <strong>[Arrow Dodge]</strong>: Highly agile armor that reduces all incoming Archer damage by 25%.</li>
+    </ul>
+    <p>Master the new matrix, balance your marches, and crush your rivals!</p>
   </div>
 </div>
 
@@ -2949,8 +3014,28 @@
     render();
   }
 
-  function troopTrainMs(t) { return Math.round(Math.max(135000, 330000 - state.barracksLevel * 22500) * (1 + (t.tierMult - 1) * 0.4) * (1 - researchBonusPct('train_speed'))); }
-  function troopTrainResourceCost(t) { return { food: Math.round(15 * t.tierMult) }; }
+  const TROOP_ECONOMY_MAP = {
+    1: { lumber: 1000,   grain: 1500,   oil: 0,     seconds: 300 },
+    2: { lumber: 2500,   grain: 3000,   oil: 200,   seconds: 900 },
+    3: { lumber: 6000,   grain: 7500,   oil: 800,   seconds: 2700 },
+    4: { lumber: 15000,  grain: 18000,  oil: 2500,  timeSeconds: 7200 },
+    5: { lumber: 40000,  grain: 45000,  oil: 8000,  timeSeconds: 21600 },
+    6: { lumber: 100000, grain: 110000, oil: 25000, timeSeconds: 57600 },
+  };
+  function troopTrainMs(t) {
+    const row = TROOP_ECONOMY_MAP[t.tier];
+    const baseMs = (row.seconds ?? row.timeSeconds) * 1000;
+    return Math.round(baseMs * (1 - researchBonusPct('train_speed')));
+  }
+  function troopTrainResourceCost(t) {
+    const row = TROOP_ECONOMY_MAP[t.tier];
+    const scale = troopBatchSize() / 100;
+    return {
+      lumber: Math.round(row.lumber * scale),
+      food: Math.round(row.grain * scale),
+      fuel: Math.round(row.oil * scale),
+    };
+  }
 
   function hospitalResourceCost() { return { lumber: Math.round(15 * Math.pow(state.hospitalLevel, RESOURCE_COST_EXPONENT)) }; }
   function hospitalBuildMs() { return Math.round(180000 * Math.pow(state.hospitalLevel, 1.5) * (1 - researchBonusPct('build_speed'))); }
@@ -9545,6 +9630,22 @@
       }
     }
   }
+
+  // Startup patch-notes announcement -- shows once per bumped ANNOUNCE_KEY
+  // (so it doesn't nag on every reload), regardless of sign-in state, since
+  // it's plain client-side UI, not account data.
+  const ANNOUNCE_KEY = 'syndicate-announce-seen-v1';
+  (function initAnnouncement() {
+    const overlay = document.getElementById('announceOverlay');
+    if (!overlay) return;
+    let seen = false;
+    try { seen = localStorage.getItem(ANNOUNCE_KEY) === '1'; } catch (e) {}
+    if (!seen) overlay.classList.add('open');
+    document.getElementById('announceCloseBtn').addEventListener('click', () => {
+      overlay.classList.remove('open');
+      try { localStorage.setItem(ANNOUNCE_KEY, '1'); } catch (e) {}
+    });
+  })();
 
   mpCheckSessionAndProfile();
 
