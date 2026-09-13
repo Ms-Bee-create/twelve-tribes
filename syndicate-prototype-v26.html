@@ -2161,6 +2161,17 @@
     }
     return { attack, defense, skill };
   }
+  // Plain-English text for each skill's actual multiplier (see
+  // effectiveAttack/effectiveDefense) -- used as tooltip copy wherever a
+  // skill name is shown in the UI, so the label isn't just flavor text.
+  const SKILL_TOOLTIPS = {
+    'Shield Bash': '+15% attack when the enemy fields any Shieldbearers.',
+    'Double Shot': '+20% attack, always.',
+    'Flank Charge': '+30% attack, always.',
+    'Iron Wall': '+15% defense, always.',
+    'Arrow Dodge': '+25% defense when the attacker fields any Archers.',
+    'Eagle Eye': "When attacking, cuts 10% off the defense of any enemy troop without its own Iron Wall or Arrow Dodge.",
+  };
   // what the SENT formation can actually do against a specific opponent's
   // composition (or a neutral 1.0x multiplier if the opponent is unknown)
   // heroMult (from heroSkillMultiplier) is applied per-troop, right alongside
@@ -2527,7 +2538,7 @@
     }).filter(Boolean);
   }
   function formatSentByLine(formation) {
-    return groupByLine(t => (formation[t.key] || 0) > 0 ? `${formation[t.key]} ${t.label}` : null);
+    return groupByLine(t => (formation[t.key] || 0) > 0 ? `${formation[t.key]} ${t.label} (${troopCombatStats(t).skill})` : null);
   }
   function formatLossesByLine(losses) {
     return groupByLine(t => {
@@ -6682,7 +6693,8 @@
       const unlocked = troopUnlocked(rep);
       const tab = document.createElement('button');
       tab.className = 'tier-tab' + (tier === trainActiveTier ? ' active' : '') + (unlocked ? '' : ' locked');
-      tab.textContent = `Tier ${rep.roman}`;
+      const lineageOdd = tier % 2 !== 0;
+      tab.innerHTML = `Tier ${rep.roman} <span style="font-size:9px;font-weight:700;color:${lineageOdd ? '#e0524a' : '#5fb8d6'}">[${lineageOdd ? 'Offensive' : 'Defensive'} Lineage]</span>`;
       tab.addEventListener('click', () => { trainActiveTier = tier; renderBarracksTroopCards(); });
       tabsEl.appendChild(tab);
     });
@@ -6704,11 +6716,13 @@
       const card = document.createElement('div');
       card.className = 'item-card';
 
+      const { skill } = troopCombatStats(t);
       const info = document.createElement('div');
       info.className = 'item-info';
       info.innerHTML = `
         <div class="item-name">${t.label} <span style="color:var(--paper-dim);font-weight:400;font-size:11px;">— ${t.row}</span></div>
         <div class="item-meta">${pool.active} active${pool.wounded ? `, ${pool.wounded} wounded` : ''}. ${t.desc}</div>
+        <div class="item-meta" style="cursor:help" title="${SKILL_TOOLTIPS[skill] || ''}">Signature Skill: <strong style="color:var(--gold)">${skill}</strong></div>
       `;
       const timerRow = document.createElement('div');
       timerRow.className = 'timer-row';
