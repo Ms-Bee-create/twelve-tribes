@@ -2665,7 +2665,11 @@
   // elsewhere (train speed, build speed, etc).
   function speedPxPerSec() {
     const levelBonus = speedBoostActive() ? (state.speedLevel - 1) * 45 : 0;
-    return (70 + levelBonus + driverSpeedBonus()) * 0.5 * (1 + researchBonusPct('march_speed'));
+    // 0.25x, not 0.5x -- her first pass at "slow marches down by half" came
+    // back feeling faster, not slower, so this doubles that slowdown
+    // (marches now take 4x as long as before either change) to be
+    // unambiguous about direction.
+    return (70 + levelBonus + driverSpeedBonus()) * 0.25 * (1 + researchBonusPct('march_speed'));
   }
   function speedUpgradeCost() { return 150 * state.speedLevel; }
 
