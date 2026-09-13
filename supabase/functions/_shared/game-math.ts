@@ -134,7 +134,9 @@ export function effectiveDefense(troops: TroopsObj, attackerHasGunner = false): 
     let { defense, skill } = troopCombatStats(t);
     if (skill === "Iron Wall") defense *= 1.15;
     if (skill === "Arrow Dodge" && attackerHasGunner) defense *= 1.25;
-    else if (attackerHasGunner) defense *= 0.90; // Eagle Eye: enemy gunners bypassing frontline armor
+    // Eagle Eye: enemy gunners bypassing frontline armor -- only troops
+    // without their own dodge/wall answer to it are vulnerable.
+    if (attackerHasGunner && skill !== "Arrow Dodge" && skill !== "Iron Wall") defense *= 0.90;
     return sum + active * defense;
   }, 0);
 }
