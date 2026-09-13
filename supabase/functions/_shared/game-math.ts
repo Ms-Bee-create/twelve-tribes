@@ -1,10 +1,10 @@
 // Shared between resolve-raid and seize-governor. This MUST stay byte-for-byte
 // equivalent to the combat math in syndicate-prototype-v26.html (TROOP_TYPES,
-// ROLE_ATTACK/ROLE_DEFENSE, COUNTERS, effectiveAttack/effectiveDefense,
-// resolveCombatBand, distributeCasualties) — if that formula changes in the
-// game file, it has to change here too, or the formation modal's preview
-// will lie about what the server actually resolves. Redeploy both functions
-// after any change here.
+// ROLE_ATTACK/ROLE_DEFENSE, COUNTERS, troopCombatStats, effectiveAttack/
+// effectiveDefense, resolveCombatBand, distributeCasualties) — if that
+// formula changes in the game file, it has to change here too, or the
+// formation modal's preview will lie about what the server actually
+// resolves. Redeploy both functions after any change here.
 
 // Soft exponential (saturating) curve: tierMult(1) = 1.0 and each further
 // tier closes most of the remaining gap to TIER_CEIL rather than adding a
@@ -19,11 +19,11 @@ function softTierMult(tier: number): number {
   return 1 + (TIER_CEIL - 1) * (1 - Math.exp(-TIER_CURVE_K * (tier - 1)));
 }
 
-export const TROOP_TYPES: { key: string; role: "enforcer" | "gunner" | "driver"; tierMult: number }[] = (() => {
+export const TROOP_TYPES: { key: string; role: "enforcer" | "gunner" | "driver"; tier: number; tierMult: number }[] = (() => {
   const roles: Array<"enforcer" | "gunner" | "driver"> = ["enforcer", "gunner", "driver"];
   const tiers = [1, 2, 3, 4, 5, 6];
-  const list: { key: string; role: "enforcer" | "gunner" | "driver"; tierMult: number }[] = [];
-  roles.forEach((role) => tiers.forEach((tier) => list.push({ key: `${role}${tier}`, role, tierMult: softTierMult(tier) })));
+  const list: { key: string; role: "enforcer" | "gunner" | "driver"; tier: number; tierMult: number }[] = [];
+  roles.forEach((role) => tiers.forEach((tier) => list.push({ key: `${role}${tier}`, role, tier, tierMult: softTierMult(tier) })));
   return list;
 })();
 
@@ -31,6 +31,51 @@ export const ROLE_ATTACK: Record<string, number> = { enforcer: 0.6, gunner: 1.0,
 export const ROLE_DEFENSE: Record<string, number> = { enforcer: 1.2, gunner: 0.6, driver: 0.7 };
 // rock-paper-scissors: Enforcer > Gunner > Driver > Enforcer
 const COUNTERS: Record<string, string> = { enforcer: "gunner", gunner: "driver", driver: "enforcer" };
+
+// 6-tier alternating system: odd tiers (1/3/5) lean offensive, even tiers
+// (2/4/6) lean defensive, each role also naming a distinct skill for its
+// odd/even side. This only feeds the raid/PvP combat calculator below
+// (effectiveAttack/effectiveDefense) -- ROLE_ATTACK/ROLE_DEFENSE + tierMult
+// above are untouched and still drive every OTHER system that reads
+// tierMult (training cost/time, kill value, power score, the separate PvE
+// engine), so this doesn't reach outside the combat calculator itself.
+const SKILL_BY_ROLE: Record<string, [string, string]> = {
+  // [odd-tier skill, even-tier skill]
+  enforcer: ["Shield Bash", "Iron Wall"],
+  gunner: ["Double Shot", "Eagle Eye"],
+  driver: ["Flank Charge", "Arrow Dodge"],
+};
+export interface TroopCombatStats { attack: number; defense: number; skill: string; }
+// Evaluated once per troop type, every time the combat loops below touch it
+// -- the switch on `role` is the skill trigger; which multiplier applies
+// (and which skill name comes back with it) is decided right here, not
+// pre-baked onto TROOP_TYPES, so a tier's odd/even skill and its stat
+// modifier can never drift apart.
+export function troopCombatStats(t: { role: string; tier: number }): TroopCombatStats {
+  const isOdd = t.tier % 2 !== 0;
+  const baseAttack = ROLE_ATTACK[t.role] * t.tier;
+  const baseDefense = ROLE_DEFENSE[t.role] * t.tier;
+  let attack: number, defense: number, skill: string;
+  switch (t.role) {
+    case "enforcer":
+      skill = isOdd ? SKILL_BY_ROLE.enforcer[0] : SKILL_BY_ROLE.enforcer[1];
+      break;
+    case "gunner":
+      skill = isOdd ? SKILL_BY_ROLE.gunner[0] : SKILL_BY_ROLE.gunner[1];
+      break;
+    default:
+      skill = isOdd ? SKILL_BY_ROLE.driver[0] : SKILL_BY_ROLE.driver[1];
+      break;
+  }
+  if (isOdd) {
+    attack = baseAttack * 1.25;
+    defense = baseDefense * 0.85;
+  } else {
+    attack = baseAttack * 0.75;
+    defense = baseDefense * 1.35;
+  }
+  return { attack, defense, skill };
+}
 
 type Formation = Record<string, number>;
 type TroopsObj = Record<string, { active: number; wounded: number }>;
@@ -73,12 +118,18 @@ export function effectiveAttack(formation: Formation, opponentProportions: RoleP
   return TROOP_TYPES.reduce((sum, t) => {
     const sent = formation[t.key] || 0;
     if (!sent) return sum;
-    return sum + sent * t.tierMult * ROLE_ATTACK[t.role] * weightedCounterMultiplier(t.role, opponentProportions) * heroMult;
+    const { attack } = troopCombatStats(t);
+    return sum + sent * attack * weightedCounterMultiplier(t.role, opponentProportions) * heroMult;
   }, 0);
 }
 
 export function effectiveDefense(troops: TroopsObj): number {
-  return TROOP_TYPES.reduce((sum, t) => sum + (troops[t.key]?.active ?? 0) * t.tierMult * ROLE_DEFENSE[t.role], 0);
+  return TROOP_TYPES.reduce((sum, t) => {
+    const active = troops[t.key]?.active ?? 0;
+    if (!active) return sum;
+    const { defense } = troopCombatStats(t);
+    return sum + active * defense;
+  }, 0);
 }
 
 // Must mirror the game file's own MAX_LEVEL=100 cap on both inputs (see its
