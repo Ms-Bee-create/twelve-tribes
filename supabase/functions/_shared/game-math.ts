@@ -115,19 +115,26 @@ function weightedCounterMultiplier(attackRole: string, proportions: RoleProporti
 // be applied twice, or against a pool of troops wider than the formation
 // actually sent, by accident.
 export function effectiveAttack(formation: Formation, opponentProportions: RoleProportions | null, heroMult = 1): number {
+  const oppHasEnforcer = !!(opponentProportions && opponentProportions.enforcer > 0);
   return TROOP_TYPES.reduce((sum, t) => {
     const sent = formation[t.key] || 0;
     if (!sent) return sum;
-    const { attack } = troopCombatStats(t);
+    let { attack, skill } = troopCombatStats(t);
+    if (skill === "Shield Bash" && oppHasEnforcer) attack *= 1.15;
+    if (skill === "Double Shot") attack *= 1.20;
+    if (skill === "Flank Charge") attack *= 1.30;
     return sum + sent * attack * weightedCounterMultiplier(t.role, opponentProportions) * heroMult;
   }, 0);
 }
 
-export function effectiveDefense(troops: TroopsObj): number {
+export function effectiveDefense(troops: TroopsObj, attackerHasGunner = false): number {
   return TROOP_TYPES.reduce((sum, t) => {
     const active = troops[t.key]?.active ?? 0;
     if (!active) return sum;
-    const { defense } = troopCombatStats(t);
+    let { defense, skill } = troopCombatStats(t);
+    if (skill === "Iron Wall") defense *= 1.15;
+    if (skill === "Arrow Dodge" && attackerHasGunner) defense *= 1.25;
+    else if (attackerHasGunner) defense *= 0.90; // Eagle Eye: enemy gunners bypassing frontline armor
     return sum + active * defense;
   }, 0);
 }

@@ -76,11 +76,12 @@ Deno.serve(async (req) => {
     const garrison: Record<string, { active: number; wounded: number }> | null =
       city.held_by && city.garrison && Object.keys(city.garrison).length ? city.garrison : null;
 
+    const attackerHasGunner = TROOP_TYPES.some((t) => t.role === "gunner" && (formation[t.key] || 0) > 0);
     let defensePower = city.power;
     let defenseComposition = BASELINE_COMPOSITION;
     if (garrison) {
       const garrisonHeroMult = heroSkillMultiplier(city.garrison_hero_level || 1, city.garrison_account_level || 1);
-      defensePower = effectiveDefense(garrison) * garrisonHeroMult;
+      defensePower = effectiveDefense(garrison, attackerHasGunner) * garrisonHeroMult;
       defenseComposition = roleProportions(garrison) || BASELINE_COMPOSITION;
     }
 
