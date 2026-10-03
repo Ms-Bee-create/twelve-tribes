@@ -1003,6 +1003,12 @@
         <div class="item-meta" id="eventUpcoming" style="margin-top:10px;"></div>
       </div>
 
+      <div class="item-card" style="display:block">
+        <div class="item-name" style="margin-bottom:4px;">🏛️ The City Gate</div>
+        <div class="item-meta" id="gateMeta"></div>
+        <div class="event-track" id="decreeTrack"></div>
+      </div>
+
       <div class="item-name" style="margin: 16px 0 8px;">Contracts</div>
       <div id="questList"></div>
     </div>
@@ -1533,6 +1539,8 @@
     eventClaims: [false, false, false, false],
     dailyStreak: 0, dailyLastClaimAt: 0, // wall-clock ms of the last claim; streak resets after a missed day
     governorHeld: false,      // true while you control the city
+    governorDecree: null,     // 'harvest' | 'muster' | 'treasury' -- only active while governorHeld
+    governorHoldMs: 0,        // running count of ms held (app open), drives the 1s income + hourly tribute chest
     governorCycleEndsAt: performance.now() + GOVERNOR_CYCLE_MS,
   };
 
@@ -1606,6 +1614,18 @@
         { pts: 140, r: { silver: 6000, items: { '3 Hour Token': 1 }, gear: 1 } },
       ] },
   ];
+  // ---- City Gate perks: while you hold it you pick ONE decree (a client-side
+  // economy buff, so nothing here touches PvP combat math), plus a tribute
+  // chest for every real hour held. Base income is 1 silver/s (was 4/s,
+  // which at real-time scale out-earned every other source by a mile).
+  const GOVERNOR_TRIBUTE_MS = 60 * 60 * 1000;
+  const GOVERNOR_TRIBUTE = { res: { lumber: 800, food: 800, water: 800 }, gateGear: 1, items: { 'Skin of Wine': 2 }, xp: 150 };
+  const GOVERNOR_DECREES = [
+    { key: 'harvest',  icon: '🌾', name: 'Harvest Decree',  desc: '+30% gather speed on every resource tile.' },
+    { key: 'muster',   icon: '🥁', name: 'Muster Decree',   desc: '-30% troop training time.' },
+    { key: 'treasury', icon: '💰', name: 'Treasury Decree', desc: 'City income doubles (1 to 2 silver/s).' },
+  ];
+  function decreeActive(key) { return state.governorHeld && state.governorDecree === key; }
   function currentEventBlock() { return Math.floor(Date.now() / EVENT_BLOCK_MS); }
   function eventForBlock(block) { return EVENTS[((block % EVENTS.length) + EVENTS.length) % EVENTS.length]; }
   function currentEvent() { return eventForBlock(state.eventBlock); }
@@ -1909,7 +1929,7 @@
   function hubTroopCap(hub) { return HUB_TROOP_CAP_PER_LEVEL * hub.level; }
   function hubGatherRate(hub, totalTroops) {
     const effTroops = Math.min(totalTroops, hubTroopCap(hub));
-    return +(hubOutput(hub) * (1 + Math.sqrt(effTroops) / 10) * (1 + researchBonusPct('gather_speed'))).toFixed(2);
+    return +(hubOutput(hub) * (1 + Math.sqrt(effTroops) / 10) * (1 + researchBonusPct('gather_speed')) * (decreeActive('harvest') ? 1.3 : 1)).toFixed(2);
   }
   function hubRegenMs(hub) { return Math.round(HUB_REGEN_MS_PER_LEVEL * hub.level); }
 
@@ -3162,7 +3182,7 @@
   };
   function troopTrainMs(t) {
     const row = TROOP_ECONOMY_MAP[t.tier];
-    return Math.round(row.seconds * 1000 * troopBatchSize() * (1 - researchBonusPct('train_speed')));
+    return Math.round(row.seconds * 1000 * troopBatchSize() * (1 - researchBonusPct('train_speed')) * (decreeActive('muster') ? 0.7 : 1));
   }
   function troopTrainResourceCost(t) {
     const row = TROOP_ECONOMY_MAP[t.tier];
@@ -8105,6 +8125,35 @@
       track.appendChild(div);
     });
 
+    const gateMeta = document.getElementById('gateMeta');
+    const decreeTrack = document.getElementById('decreeTrack');
+    decreeTrack.innerHTML = '';
+    if (state.governorHeld) {
+      const untilTribute = GOVERNOR_TRIBUTE_MS - (state.governorHoldMs % GOVERNOR_TRIBUTE_MS);
+      gateMeta.textContent = `You hold the Gate: ${decreeActive('treasury') ? 2 : 1} silver/s. Next tribute chest in ${fmtSecs(untilTribute)} (${describeReward(GOVERNOR_TRIBUTE)}). ${state.governorDecree ? '' : 'Pick a decree:'}`;
+      GOVERNOR_DECREES.forEach(d => {
+        const div = document.createElement('div');
+        const on = state.governorDecree === d.key;
+        div.className = 'event-milestone' + (on ? ' reached' : '');
+        div.innerHTML = `<span class="pts">${d.icon} ${d.name}</span><span class="reward">${d.desc}</span>`;
+        const btn = document.createElement('button');
+        btn.className = 'gold-btn';
+        btn.style.cssText = 'margin-top:6px;width:100%;';
+        btn.textContent = on ? 'Active' : 'Decree';
+        btn.disabled = on;
+        btn.addEventListener('click', () => {
+          if (!state.governorHeld) return;
+          state.governorDecree = d.key;
+          addLog(`You issued the ${d.name}.`, 'win', 'system');
+          render();
+        });
+        div.appendChild(btn);
+        decreeTrack.appendChild(div);
+      });
+    } else {
+      gateMeta.textContent = `You don't hold the Gate. Seize it for 1 silver/s, a tribute chest every hour held (${describeReward(GOVERNOR_TRIBUTE)}), and a decree of your choice: faster gathering, faster training, or double income. Hold it until someone takes it from you.`;
+    }
+
     const questList = document.getElementById('questList');
     questList.innerHTML = '';
     quests.forEach(q => {
@@ -8478,8 +8527,15 @@
       }
     });
     if (state.governorHeld) {
-      state.coins += 4; // running the city pays out while you hold it
+      state.governorHoldMs += 1000;
+      state.coins += decreeActive('treasury') ? 2 : 1; // running the city pays while you hold it
+      if (state.governorHoldMs % GOVERNOR_TRIBUTE_MS === 0) {
+        grantReward(GOVERNOR_TRIBUTE);
+        addLog(`The City Gate's hourly tribute arrives — ${describeReward(GOVERNOR_TRIBUTE)}.`, 'win', 'system');
+      }
       changed = true;
+    } else if (state.governorHoldMs) {
+      state.governorHoldMs = 0; // lost or left the Gate: the next hold starts a fresh tribute clock
     }
     if (garageOutput() > 0 && state.pendingFuel < garageBufferCap()) {
       state.pendingFuel = Math.min(garageBufferCap(), state.pendingFuel + garageOutput());
@@ -8722,6 +8778,8 @@
         dailyStreak: state.dailyStreak,
         dailyLastClaimAt: state.dailyLastClaimAt,
         governorHeld: state.governorHeld,
+        governorDecree: state.governorDecree,
+        governorHoldMs: state.governorHoldMs,
         governorCycleRemainMs: msRemaining(state.governorCycleEndsAt),
         baseX: BASE.x, baseY: BASE.y,
       },
@@ -8867,6 +8925,8 @@
       dailyStreak: save.state.dailyStreak || 0,
       dailyLastClaimAt: save.state.dailyLastClaimAt || 0,
       governorHeld: !!save.state.governorHeld,
+      governorDecree: save.state.governorDecree || null,
+      governorHoldMs: save.state.governorHoldMs || 0,
       governorCycleEndsAt: performance.now() + catchUpMs(save.state.governorCycleRemainMs != null ? save.state.governorCycleRemainMs : GOVERNOR_CYCLE_MS),
     });
     Object.assign(state.resources, save.state.resources);
