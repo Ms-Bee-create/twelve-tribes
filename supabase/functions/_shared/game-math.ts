@@ -86,16 +86,24 @@ type RoleProportions = { enforcer: number; gunner: number; driver: number };
 // tier and raw numbers entirely. Flattened to a clean +/-20% modifier (within
 // the intended 15-30% band) — advantage still matters, but it's a nudge on
 // top of tier/numbers rather than the deciding factor by itself.
-const COUNTER_BONUS = 0.2;
+// Now 0.15 because it applies on BOTH sides (attacker's attack and
+// defender's defense, see effectiveDefense) -- a full matchup swing of ~1.8x
+// between the best and worst formation, so the right mix can beat a bigger
+// army, from either seat.
+const COUNTER_BONUS = 0.15;
 function counterMultiplier(attackRole: string, defendRole: string): number {
   if (attackRole === defendRole) return 1.0;
   if (COUNTERS[attackRole] === defendRole) return 1 + COUNTER_BONUS;
   return 1 - COUNTER_BONUS;
 }
 
-export function roleProportions(troops: TroopsObj): RoleProportions | null {
+export function roleProportions(troops: TroopsObj | Formation | null): RoleProportions | null {
+  if (!troops) return null;
   const sums = { enforcer: 0, gunner: 0, driver: 0 };
-  TROOP_TYPES.forEach((t) => { sums[t.role] += troops[t.key]?.active ?? 0; });
+  TROOP_TYPES.forEach((t) => {
+    const v = (troops as Record<string, number | { active: number }>)[t.key];
+    sums[t.role] += typeof v === "number" ? v : (v?.active ?? 0);
+  });
   const total = sums.enforcer + sums.gunner + sums.driver;
   if (total <= 0) return null;
   return { enforcer: sums.enforcer / total, gunner: sums.gunner / total, driver: sums.driver / total };
@@ -127,11 +135,18 @@ export function effectiveAttack(formation: Formation, opponentProportions: RoleP
   }, 0);
 }
 
-export function effectiveDefense(troops: TroopsObj, attackerHasGunner = false): number {
+// attackerFormation (the incoming march, null if unknown) drives both the
+// skill checks below and the defender-side counter bonus: a role that
+// counters what's attacking gets +COUNTER_BONUS, one that gets countered
+// loses it.
+export function effectiveDefense(troops: TroopsObj, attackerFormation: Formation | null = null): number {
+  const attackerProportions = roleProportions(attackerFormation);
+  const attackerHasGunner = !!(attackerProportions && attackerProportions.gunner > 0);
   return TROOP_TYPES.reduce((sum, t) => {
     const active = troops[t.key]?.active ?? 0;
     if (!active) return sum;
     let { defense, skill } = troopCombatStats(t);
+    defense *= weightedCounterMultiplier(t.role, attackerProportions);
     if (skill === "Iron Wall") defense *= 1.15;
     if (skill === "Arrow Dodge" && attackerHasGunner) defense *= 1.25;
     // Eagle Eye: enemy gunners bypassing frontline armor -- only troops

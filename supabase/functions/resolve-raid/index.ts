@@ -96,8 +96,7 @@ Deno.serve(async (req) => {
     // heroMult buffs each troop's own attack stat directly (see effectiveAttack) --
     // scoped to exactly the formation sent, never the attacker's whole stockpile.
     const attackPower = effectiveAttack(formation, roleProportions(defender.troops), heroSkillMultiplier(heroLevel, attacker.level || 1));
-    const attackerHasGunner = TROOP_TYPES.some((t) => t.role === "gunner" && (formation[t.key] || 0) > 0);
-    const baseDefense = effectiveDefense(defender.troops, attackerHasGunner);
+    const baseDefense = effectiveDefense(defender.troops, formation);
     const defensePower = baseDefense * fortificationMult(defender.fortification_level) * wallMult(defender.wall_garrison, defender.level || 1);
     const ratio = defensePower > 0 ? attackPower / defensePower : (attackPower > 0 ? 99 : 0);
     const result = resolveCombatBand(ratio);
