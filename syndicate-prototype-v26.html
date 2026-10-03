@@ -733,9 +733,12 @@
     padding: 8px; resize: vertical;
   }
 
-  .event-track { display: flex; gap: 8px; margin-top: 4px; }
+  .event-track { display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+  .event-bar { height: 8px; background: rgba(26,22,19,0.7); border: 1px solid var(--stone-line); margin: 6px 0 8px; }
+  .event-bar-fill { height: 100%; width: 0; background: var(--gold); transition: width 0.4s; }
+  .event-milestone .reward { display: block; font-size: 10px; color: var(--paper-dim); line-height: 1.35; }
   .event-milestone {
-    flex: 1; text-align: center;
+    flex: 1 1 22%; min-width: 70px; text-align: center;
     border: 1px solid var(--stone-line);
     background: rgba(26,22,19,0.5);
     padding: 10px 6px;
@@ -991,9 +994,13 @@
       </div>
 
       <div class="item-card" style="display:block">
-        <div class="item-name" style="margin-bottom:8px;">Weekly Push — Purge the Raiders</div>
-        <div class="item-meta" id="eventMeta">0 points earned this cycle.</div>
+        <div class="item-name" style="margin-bottom:4px;" id="eventTitle">Event</div>
+        <div class="item-meta" id="eventBlurb"></div>
+        <div class="item-meta" id="eventEarn" style="margin-top:4px;"></div>
+        <div class="item-meta" id="eventMeta" style="margin-top:6px;">0 points earned this event.</div>
+        <div class="event-bar"><div class="event-bar-fill" id="eventBarFill"></div></div>
         <div class="event-track" id="eventTrack"></div>
+        <div class="item-meta" id="eventUpcoming" style="margin-top:10px;"></div>
       </div>
 
       <div class="item-name" style="margin: 16px 0 8px;">Contracts</div>
@@ -1235,7 +1242,7 @@
       </div>
       <div class="help-entry">
         <div class="help-entry-name">The Gathering</div>
-        <div class="help-entry-desc">Your recurring rewards live here: the Daily Check-In, the current Weekly Push milestones, and one-off Contracts.</div>
+        <div class="help-entry-desc">Your recurring rewards live here: a 7-day Daily Check-In streak, the live event (a new one every 4 real hours, the same for every player, six in rotation), and one-off Contracts. Earn points toward an event's reward tiers, then Claim before it ends — unclaimed rewards don't carry over.</div>
       </div>
       <div class="help-entry">
         <div class="help-entry-name">Lumber Yard, Threshing Floor & Cistern</div>
@@ -1453,8 +1460,8 @@
 <script>
   // Demo speed note: real build/train/event timers would run hours to days.
   // Everything here runs in seconds/minutes so the loop is actually testable.
-  const EVENT_DURATION_MS = 25 * 60 * 1000; // one "weekly push" cycle, demo speed
-  const DAILY_COOLDOWN_MS = 90 * 1000;     // demo speed daily check-in
+  const EVENT_BLOCK_MS = 4 * 60 * 60 * 1000; // real wall-clock 4-hour event blocks, same schedule for everyone
+  const DAILY_COOLDOWN_MS = 24 * 60 * 60 * 1000; // real 24h daily check-in
   const GOVERNOR_CYCLE_MS = 8 * 60 * 1000; // stands in for "every 3 days," demo speed
   // The Trial — modeled on Mafia City's real Prison Break: climb a ladder of
   // guards, no march/travel, a real daily cap on attempts. Demo-speed reset,
@@ -1522,7 +1529,9 @@
     gearInventory: [],
     relocateReadyAt: 0,
     eventPoints: 0,
-    eventEndsAt: performance.now() + EVENT_DURATION_MS,
+    eventBlock: currentEventBlock(), // which real 4h block eventPoints/eventClaims belong to
+    eventClaims: [false, false, false, false],
+    dailyStreak: 0, dailyLastClaimAt: 0, // wall-clock ms of the last claim; streak resets after a missed day
     governorHeld: false,      // true while you control the city
     governorCycleEndsAt: performance.now() + GOVERNOR_CYCLE_MS,
   };
@@ -1538,10 +1547,118 @@
     { id: 'trainBatch', desc: 'Train a batch of troops', target: 1, progress: 0, reward: 120, claimed: false },
   ];
 
-  const EVENT_MILESTONES = [
-    { points: 5, reward: 150 },
-    { points: 15, reward: 400 },
-    { points: 30, reward: 900 },
+  // ---- Events: real wall-clock 4h blocks on a fixed 6-event daily rotation,
+  // so every player sees the same event at the same time with no server.
+  // `earn` maps an action kind to points per unit; each tier's reward `r` is
+  // any mix of silver / res (resources) / items (inventory name -> count) /
+  // gear (random Forge materials) / gateGear (random Gate materials) / xp.
+  const EVENT_EARN_TEXT = {
+    kill: 'per raider killed', raid: 'per camp raid won', boss: 'per boss mansion won',
+    gate: 'per City Gate seized', gather: 'per 2,000 resources gathered', train: 'per 50 troops trained',
+  };
+  const EVENTS = [
+    { id: 'harvest', icon: '🌾', name: 'Harvest Festival', blurb: 'The fields are heavy. Send crews to the resource tiles and fill the Storehouse.',
+      earn: { gather: 0.0005 },
+      tiers: [
+        { pts: 30,  r: { res: { lumber: 500, food: 500, water: 500 } } },
+        { pts: 80,  r: { silver: 400, items: { '1 Hour Token': 1 } } },
+        { pts: 150, r: { res: { lumber: 1500, food: 1500, water: 1500 }, items: { 'Skin of Wine': 2 } } },
+        { pts: 250, r: { silver: 1000, items: { '3 Hour Token': 1 }, res: { fuel: 40 } } },
+      ] },
+    { id: 'purge', icon: '🗡️', name: 'Purge the Raiders', blurb: 'Roving raiders are thick on the roads. Every kill and camp you break counts.',
+      earn: { kill: 3, raid: 4, boss: 6, gate: 8 },
+      tiers: [
+        { pts: 12,  r: { silver: 300, items: { 'Skin of Wine': 1 } } },
+        { pts: 30,  r: { gear: 1, items: { '1 Hour Token': 1 } } },
+        { pts: 60,  r: { silver: 800, gear: 1, items: { 'Skin of Wine': 2 } } },
+        { pts: 100, r: { gear: 2, items: { '3 Hour Token': 1 }, xp: 400 } },
+      ] },
+    { id: 'giants', icon: '👹', name: 'Giant-Slayer Hunt', blurb: 'The giants are out. Break a boss mansion with the right formation and the whole camp eats well.',
+      earn: { boss: 15, raid: 2, gate: 6 },
+      tiers: [
+        { pts: 15,  r: { silver: 500, items: { 'Skin of Wine': 1 } } },
+        { pts: 45,  r: { gear: 1, items: { '3 Hour Token': 1 } } },
+        { pts: 90,  r: { gear: 2, silver: 1200, xp: 300 } },
+        { pts: 150, r: { gear: 2, items: { '8 Hour Token': 1, 'Skin of Wine': 3 }, xp: 800 } },
+      ] },
+    { id: 'muster', icon: '🥁', name: 'Muster Call', blurb: 'The tribes are arming. Every soldier you finish training moves the bar.',
+      earn: { train: 0.02 },
+      tiers: [
+        { pts: 20,  r: { res: { lumber: 600, food: 600, water: 600 } } },
+        { pts: 50,  r: { items: { '1 Hour Token': 2 }, silver: 300 } },
+        { pts: 100, r: { res: { lumber: 2000, food: 2000, water: 2000 }, items: { 'Skin of Wine': 2 } } },
+        { pts: 180, r: { items: { '8 Hour Token': 1 }, res: { fuel: 60 }, silver: 1000 } },
+      ] },
+    { id: 'siege', icon: '🏛️', name: 'Siege of the Gate', blurb: 'Whoever holds the City Gate holds the land. Take it, and take what the Gate hands out.',
+      earn: { gate: 25, boss: 5, raid: 2, kill: 1 },
+      tiers: [
+        { pts: 10, r: { silver: 400, items: { 'Skin of Wine': 1 } } },
+        { pts: 25, r: { gateGear: 1, items: { '1 Hour Token': 1 } } },
+        { pts: 50, r: { gateGear: 1, silver: 1000, items: { '3 Hour Token': 1 } } },
+        { pts: 80, r: { gateGear: 2, gear: 1, xp: 600, items: { 'Skin of Wine': 3 } } },
+      ] },
+    { id: 'tribute', icon: '💰', name: 'Tribute Day', blurb: 'The merchants pay well for safe roads. Any fight you win earns silver, and so does honest hauling.',
+      earn: { kill: 2, raid: 3, boss: 4, gate: 6, gather: 0.0002 },
+      tiers: [
+        { pts: 15,  r: { silver: 600 } },
+        { pts: 40,  r: { silver: 1500, items: { '1 Hour Token': 1 } } },
+        { pts: 80,  r: { silver: 3000, items: { 'Skin of Wine': 2 } } },
+        { pts: 140, r: { silver: 6000, items: { '3 Hour Token': 1 }, gear: 1 } },
+      ] },
+  ];
+  function currentEventBlock() { return Math.floor(Date.now() / EVENT_BLOCK_MS); }
+  function eventForBlock(block) { return EVENTS[((block % EVENTS.length) + EVENTS.length) % EVENTS.length]; }
+  function currentEvent() { return eventForBlock(state.eventBlock); }
+  function eventMsRemaining() { return (state.eventBlock + 1) * EVENT_BLOCK_MS - Date.now(); }
+  // new block -> fresh points and unclaimed tiers (unclaimed rewards from the
+  // old block are gone, same as any timed event)
+  function syncEventBlock() {
+    const block = currentEventBlock();
+    if (state.eventBlock === block) return false;
+    state.eventBlock = block;
+    state.eventPoints = 0;
+    state.eventClaims = [false, false, false, false];
+    return true;
+  }
+  function eventProgress(kind, amount = 1) {
+    syncEventBlock();
+    const w = currentEvent().earn[kind];
+    if (w) state.eventPoints += amount * w;
+  }
+  function describeReward(r) {
+    const parts = [];
+    if (r.silver) parts.push(`${r.silver} silver`);
+    if (r.res) Object.entries(r.res).forEach(([k, n]) => parts.push(`${n} ${RESOURCE_LABELS[k] || k}`));
+    if (r.items) Object.entries(r.items).forEach(([k, n]) => parts.push(n > 1 ? `${n}x ${k}` : k));
+    if (r.gear) parts.push(`${r.gear} gear material${r.gear > 1 ? 's' : ''}`);
+    if (r.gateGear) parts.push(`${r.gateGear} Gate material${r.gateGear > 1 ? 's' : ''}`);
+    if (r.xp) parts.push(`${r.xp} xp`);
+    return parts.join(', ');
+  }
+  function grantReward(r) {
+    if (r.silver) state.coins += r.silver;
+    if (r.res) Object.entries(r.res).forEach(([k, n]) => { state.resources[k] = Math.min(resourceCap(), (state.resources[k] || 0) + n); });
+    if (r.items) Object.entries(r.items).forEach(([k, n]) => { inventory[k] = (inventory[k] || 0) + n; });
+    const grantMaterials = (pool, n) => {
+      for (let i = 0; i < n; i++) {
+        const item = pool[Math.floor(Math.random() * pool.length)];
+        inventory[item] = (inventory[item] || 0) + 1;
+        state.lootTally[item] = (state.lootTally[item] || 0) + 1;
+      }
+    };
+    if (r.gear) grantMaterials(Object.values(LOOT_TABLE).flat(), r.gear);
+    if (r.gateGear) grantMaterials(GEAR_TYPES.find(g => g.key === 'gate').materials, r.gateGear);
+    if (r.xp) gainXp(r.xp);
+  }
+  // 7-day check-in ladder, then it loops; missing a day resets to day 1
+  const DAILY_LADDER = [
+    { silver: 200 },
+    { res: { lumber: 400, food: 400, water: 400 } },
+    { items: { 'Skin of Wine': 2 } },
+    { items: { '1 Hour Token': 1 }, silver: 200 },
+    { silver: 600, res: { fuel: 25 } },
+    { gear: 2 },
+    { items: { '3 Hour Token': 1 }, silver: 1000, res: { lumber: 1000, food: 1000, water: 1000 } },
   ];
 
   // Each syndicate icon supplies the FULL material set for exactly one Forge
@@ -4660,7 +4777,7 @@
         t.health = t.maxHealth;
         t.deadUntil = performance.now() + t.respawnMs;
         relocateTarget(t);
-        state.eventPoints += 1;
+        eventProgress('kill');
         const kq = quests.find(q => q.id === 'kills3');
         if (kq && !kq.claimed) kq.progress = Math.min(kq.target, kq.progress + 1);
         const loot = rollLoot(t, rewardMult);
@@ -4688,7 +4805,7 @@
         state.coins += killReward.silver;
         if (rb.resType !== 'gold') state.resources[rb.resType] += rb.resAmt;
         gainXp(killReward.xp);
-        state.eventPoints += 2;
+        eventProgress(rb.isBoss ? 'boss' : 'raid');
         rb.defeatedUntil = performance.now() + rb.respawnMs;
         relocateRivalBase(rb);
         rb.scouted = false;
@@ -4722,7 +4839,7 @@
       if (result.won) {
         state.governorHeld = true;
         gainXp(killReward.xp);
-        state.eventPoints += 5;
+        eventProgress('gate');
         addLog(`${hero.name} seized the City Gate${lossSplit.totalLost > 0 ? ` — ${lossSplit.totalLost} lost taking it` : ''}. +${killReward.xp} xp. The city is yours until the next reset.`, 'win', 'combat', detail);
       } else {
         if (killReward.xp > 0) gainXp(killReward.xp);
@@ -4811,6 +4928,7 @@
       const detail = buildBattleDetail(sentSnapshot, losses, result.band);
       if (result.won) {
         state.coins += result.coinReward;
+        eventProgress('raid');
         const stolen = result.stolen || {};
         let stolenTag = '';
         TROOP_TYPES.forEach(t => {
@@ -4863,7 +4981,7 @@
         const matTag = mat ? ` Found: ${mat}.` : '';
         addLog(`${hero.name} seized the City Gate and is garrisoned there.${lossTag} The city is yours until someone takes it.${captureTag}${matTag}`, 'win', 'combat', detail);
         gainXp(Math.round((result.cityPower || 60) * 2));
-        state.eventPoints += 5;
+        eventProgress('gate');
         await mpPullCityControl();
         render();
         return;
@@ -7931,7 +8049,8 @@
     const dailyBtn = document.getElementById('dailyBtn');
     const dailyMeta = document.getElementById('dailyMeta');
     if (dailyReady) {
-      dailyMeta.textContent = 'Ready to claim — 80 silver.';
+      const streakNow = (Date.now() - state.dailyLastClaimAt > 2 * DAILY_COOLDOWN_MS) ? 0 : state.dailyStreak;
+      dailyMeta.textContent = `Day ${streakNow % DAILY_LADDER.length + 1} of 7 — ${describeReward(DAILY_LADDER[streakNow % DAILY_LADDER.length])}. Miss a day and the streak resets.`;
       dailyBtn.textContent = 'Claim';
       dailyBtn.disabled = false;
     } else {
@@ -7941,21 +8060,31 @@
       dailyBtn.disabled = true;
     }
 
-    const eventRemain = Math.max(0, state.eventEndsAt - performance.now());
-    document.getElementById('eventMeta').textContent =
-      eventRemain > 0
-        ? `${state.eventPoints} points earned · resets in ${fmtSecs(eventRemain)}.`
-        : `${state.eventPoints} points earned · cycle ended, ready to reset.`;
+    syncEventBlock();
+    const ev = currentEvent();
+    const pts = Math.floor(state.eventPoints);
+    document.getElementById('eventTitle').textContent = `${ev.icon} ${ev.name}`;
+    document.getElementById('eventBlurb').textContent = ev.blurb;
+    document.getElementById('eventEarn').textContent = 'Earn points: ' + Object.entries(ev.earn)
+      .map(([k, w]) => (k === 'gather' ? `${+(w * 2000).toFixed(2)} ` : k === 'train' ? `${+(w * 50).toFixed(2)} ` : `${w} `) + EVENT_EARN_TEXT[k])
+      .join(' · ');
+    document.getElementById('eventMeta').textContent = `${pts} points earned · this event ends in ${fmtSecs(eventMsRemaining())}.`;
+    const topPts = ev.tiers[ev.tiers.length - 1].pts;
+    document.getElementById('eventBarFill').style.width = Math.min(100, (state.eventPoints / topPts) * 100) + '%';
+    const upcoming = [1, 2, 3].map(n => {
+      const e = eventForBlock(state.eventBlock + n);
+      return `${e.icon} ${e.name} in ${fmtSecs(eventMsRemaining() + (n - 1) * EVENT_BLOCK_MS)}`;
+    });
+    document.getElementById('eventUpcoming').textContent = 'Coming up: ' + upcoming.join(' · ');
 
     const track = document.getElementById('eventTrack');
     track.innerHTML = '';
-    EVENT_MILESTONES.forEach((m, i) => {
-      const reached = state.eventPoints >= m.points;
+    ev.tiers.forEach((m, i) => {
+      const reached = state.eventPoints >= m.pts;
+      const claimed = state.eventClaims[i];
       const div = document.createElement('div');
       div.className = 'event-milestone' + (reached ? ' reached' : '');
-      const claimedKey = 'claimed' + i;
-      const claimed = m[claimedKey];
-      div.innerHTML = `<span class="pts">${m.points} pts</span>+${m.reward}c`;
+      div.innerHTML = `<span class="pts">${m.pts} pts</span><span class="reward">${describeReward(m.r)}</span>`;
       if (reached && !claimed) {
         const btn = document.createElement('button');
         btn.textContent = 'Claim';
@@ -7963,9 +8092,10 @@
         btn.style.marginTop = '6px';
         btn.style.width = '100%';
         btn.addEventListener('click', () => {
-          state.coins += m.reward;
-          m[claimedKey] = true;
-          addLog(`Weekly push milestone hit — +${m.reward} silver.`, 'win', 'system');
+          if (state.eventBlock !== currentEventBlock() || state.eventClaims[i]) { render(); return; }
+          state.eventClaims[i] = true;
+          grantReward(m.r);
+          addLog(`${ev.name} reward — ${describeReward(m.r)}.`, 'win', 'system');
           render();
         });
         div.appendChild(btn);
@@ -8283,9 +8413,13 @@
 
   document.getElementById('dailyBtn').addEventListener('click', () => {
     if (performance.now() < state.dailyReadyAt) return;
-    state.coins += 80;
+    if (Date.now() - state.dailyLastClaimAt > 2 * DAILY_COOLDOWN_MS) state.dailyStreak = 0;
+    const reward = DAILY_LADDER[state.dailyStreak % DAILY_LADDER.length];
+    grantReward(reward);
+    state.dailyStreak += 1;
+    state.dailyLastClaimAt = Date.now();
     state.dailyReadyAt = performance.now() + DAILY_COOLDOWN_MS;
-    addLog('Claimed the daily check-in — +80 silver.', 'win', 'system');
+    addLog(`Daily check-in, day ${(state.dailyStreak - 1) % DAILY_LADDER.length + 1} — ${describeReward(reward)}.`, 'win', 'system');
     render();
   });
 
@@ -8329,6 +8463,7 @@
       else {
         state.resources[key] = Math.min(cap, state.resources[key] + amount);
         state.farmTally[key] = (state.farmTally[key] || 0) + amount;
+        eventProgress('gather', amount);
       }
       h.reserve -= amount;
       changed = true;
@@ -8384,6 +8519,7 @@
       if (timers[key] && timerRemaining(key) <= 0) {
         const gained = timers[key].meta.batch;
         state.troopTypes[t.key].active += gained;
+        eventProgress('train', gained);
         timers[key] = null;
         const q = quests.find(q => q.id === 'trainBatch');
         if (q && !q.claimed) q.progress = Math.min(q.target, q.progress + 1);
@@ -8468,11 +8604,8 @@
         changed = true;
       }
     });
-    if (state.eventEndsAt <= performance.now()) {
-      state.eventPoints = 0;
-      state.eventEndsAt = performance.now() + EVENT_DURATION_MS;
-      EVENT_MILESTONES.forEach((m, i) => { m['claimed' + i] = false; });
-      addLog('A new weekly push has begun.', 'hub', 'system');
+    if (syncEventBlock()) {
+      addLog(`A new event has begun: ${currentEvent().name}.`, 'hub', 'system');
       changed = true;
     }
     if (!mpSession && state.governorCycleEndsAt <= performance.now()) {
@@ -8584,7 +8717,10 @@
         lifetimeKills: state.lifetimeKills,
         resources: { ...state.resources },
         eventPoints: state.eventPoints,
-        eventRemainMs: msRemaining(state.eventEndsAt),
+        eventBlock: state.eventBlock,
+        eventClaims: [...state.eventClaims],
+        dailyStreak: state.dailyStreak,
+        dailyLastClaimAt: state.dailyLastClaimAt,
         governorHeld: state.governorHeld,
         governorCycleRemainMs: msRemaining(state.governorCycleEndsAt),
         baseX: BASE.x, baseY: BASE.y,
@@ -8638,7 +8774,6 @@
       quests: quests.map(q => ({ id: q.id, progress: q.progress, claimed: q.claimed })),
       rivalBases: rivalBases.map(rb => ({ name: rb.name, scouted: rb.scouted, deadRemainMs: msRemaining(rb.defeatedUntil), x: rb.x, y: rb.y })),
       governor: { power: GOVERNOR.power, scouted: GOVERNOR.scouted },
-      milestonesClaimed: EVENT_MILESTONES.map((m, i) => !!m['claimed' + i]),
       inventory: { ...inventory },
       timers: Object.fromEntries(
         Object.keys(timers).map(key => {
@@ -8724,8 +8859,13 @@
       lootTally: { ...(save.state.lootTally || {}) },
       farmTally: { lumber: 0, food: 0, water: 0, fuel: 0, ...(save.state.farmTally || {}) },
       lifetimeKills: save.state.lifetimeKills || 0,
-      eventPoints: save.state.eventPoints,
-      eventEndsAt: performance.now() + catchUpMs(save.state.eventRemainMs),
+      // progress only carries over inside the SAME real 4h block; a save from an
+      // older block (or the old format) starts the current event fresh
+      eventBlock: currentEventBlock(),
+      eventPoints: save.state.eventBlock === currentEventBlock() ? (save.state.eventPoints || 0) : 0,
+      eventClaims: save.state.eventBlock === currentEventBlock() && Array.isArray(save.state.eventClaims) ? [...save.state.eventClaims] : [false, false, false, false],
+      dailyStreak: save.state.dailyStreak || 0,
+      dailyLastClaimAt: save.state.dailyLastClaimAt || 0,
       governorHeld: !!save.state.governorHeld,
       governorCycleEndsAt: performance.now() + catchUpMs(save.state.governorCycleRemainMs != null ? save.state.governorCycleRemainMs : GOVERNOR_CYCLE_MS),
     });
@@ -8929,10 +9069,6 @@
       GOVERNOR.power = save.governor.power || rollGovernorPower();
       GOVERNOR.scouted = !!save.governor.scouted;
     }
-
-    (save.milestonesClaimed || []).forEach((claimed, i) => {
-      if (EVENT_MILESTONES[i]) EVENT_MILESTONES[i]['claimed' + i] = claimed;
-    });
 
     Object.keys(inventory).forEach(k => delete inventory[k]);
     Object.assign(inventory, save.inventory || {});
