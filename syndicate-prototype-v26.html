@@ -2420,6 +2420,23 @@
       return sum + active * defense;
     }, 0);
   }
+  // Win chance vs an NPC camp/boss, from running the real kill simulator a
+  // few dozen times with the exact multipliers the actual raid uses (see the
+  // 'raid' branch of the march resolver).
+  function pveWinChance(formation, rb, hero) {
+    const tier = rb.isBoss ? 5 : Math.max(1, Math.min(5, Math.ceil(rivalPower(rb) / 500)));
+    const comp = rivalComposition(rb);
+    const attackerMult = heroSkillMultiplier(hero) * (1 + researchBonusPct('troop_attack'));
+    const mitigation = Math.max(0.05, (1 - (hero ? heroGearBonus(hero, 'ward') : 0)) * (1 - researchBonusPct('troop_defense')));
+    const runs = 40;
+    let wins = 0;
+    for (let i = 0; i < runs; i++) {
+      const f = { ...formation };
+      const d = synthesizeOpponentTroops(rivalPower(rb), comp, tier);
+      if (resolveCombatKills(f, d, attackerMult, 1, mitigation).won) wins++;
+    }
+    return wins / runs;
+  }
   // Odds-preview defense: real troop-backed targets (a player's home army, the
   // City Gate garrison) are recomputed against THIS formation so the defender
   // counter bonus and Eagle Eye show up in the preview exactly as the server
@@ -6381,7 +6398,13 @@
     const defPower = formationOddsTarget ? oddsDefensePower(formationOddsTarget, formationValues) : 0;
     if (formationOddsTarget && defPower) {
       const ratio = effectiveAttack(formationValues, rivalComposition(formationOddsTarget), heroSkillMultiplier(formationCurrentHero)) / defPower;
-      text += ` · ${combatBandLabel(ratio)} (${ratio.toFixed(2)}x)`;
+      if (rivalBases.includes(formationOddsTarget) && totalSent > 0) {
+        // NPC camps/bosses are resolved by the kill simulator, not the ratio
+        // formula, so preview with that same simulator.
+        text += ` · Est. win chance ${Math.round(pveWinChance(formationValues, formationOddsTarget, formationCurrentHero) * 100)}% (fight simulation)`;
+      } else {
+        text += ` · ${combatBandLabel(ratio)} (${ratio.toFixed(2)}x)`;
+      }
       // Her ask: show what's actually known about the opponent's troops.
       // Every target reachable here (rival base, Boss Mansion, City Gate,
       // Trial) is already scouted/known by the time the formation modal can
