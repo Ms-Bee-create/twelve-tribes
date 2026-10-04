@@ -2010,7 +2010,15 @@
   // Mansion is liveScaled but NOT isBoss, so it's an always-relevant fight
   // at a real fixed fraction of your own power, without the boss-fight
   // role-countering on top.
-  function rivalPower(rb) { return rb.liveScaled ? Math.round(powerRating() * rb.bossMult) : rb.power; }
+  // Calibrated by simulating ~480 armies (tiers 2-6, mixed and skewed) against
+  // the real kill simulator: at 1.0 a boss with bossMult 1.0 only lost to
+  // equal power ~31% of the time; 0.65 makes equal power win ~70%, with
+  // bossMult 0.85 ~82% and 1.15 ~58%. Bosses only -- Medium Mansions keep their own scale.
+  const BOSS_POWER_SCALE = 0.65;
+  function rivalPower(rb) {
+    if (!rb.liveScaled) return rb.power;
+    return Math.round(powerRating() * rb.bossMult * (rb.isBoss ? BOSS_POWER_SCALE : 1));
+  }
   function dominantTroopRole() {
     const totals = { enforcer: 0, gunner: 0, driver: 0 };
     TROOP_TYPES.forEach(t => { totals[t.role] += state.troopTypes[t.key].active; });
@@ -2573,7 +2581,7 @@
   // difficulty proxy) -- a first-pass, tunable-by-feel choice like every
   // other curve in this file, not load-bearing precision.
   function synthesizeOpponentTroops(power, proportions, tier) {
-    const tierMultByTier = [1.0, 2.0, 3.5, 5.0, 7.0, 9.5];
+    const tierMultByTier = [1, 2, 3, 4, 5, 6].map(softTierMult);
     const clampedTier = Math.max(1, Math.min(6, Math.round(tier)));
     const secondaryTier = Math.max(1, clampedTier - 1);
     const composition = {};
