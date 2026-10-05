@@ -3269,7 +3269,9 @@
   // the site's own level boosts every one of its plots at once, separate from
   // each plot's individual level (which just builds/upgrades that one plot)
   function fieldSiteOutputMult(fieldKey) { return 1 + (state.fieldLevels[fieldKey] - 1) * 0.15; }
-  function fieldPlotOutputPerHour(level, fieldKey) { return level > 0 ? 20 * level * fieldSiteOutputMult(fieldKey) : 0; }
+  // 100/level/hr (was 20): at each tier's unlock level a full 8h buffer now
+  // roughly equals one full batch of that tier (was ~1/5 of one).
+  function fieldPlotOutputPerHour(level, fieldKey) { return level > 0 ? 100 * level * fieldSiteOutputMult(fieldKey) : 0; }
   function fieldResourceTotalPerHour(resourceKey) {
     return state.resourceBuildings[resourceKey].reduce((sum, lvl) => sum + fieldPlotOutputPerHour(lvl, resourceKey), 0);
   }
