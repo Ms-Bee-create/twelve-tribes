@@ -3205,13 +3205,22 @@
     5: { lumber: 81,  grain: 122, water: 97,  oil: 15, seconds: 24 },
     6: { lumber: 103, grain: 154, water: 123, oil: 22, seconds: 31 },
   };
-  function troopTrainMs(t) {
+  // A full batch costs more than the Storehouse can even hold from Tier 2 up
+  // (126-240% of the cap at each tier's unlock level), so a batch is sized to
+  // what you can afford right now, up to the normal batch size, min 1.
+  function troopTrainSize(t) {
     const row = TROOP_ECONOMY_MAP[t.tier];
-    return Math.round(row.seconds * 1000 * troopBatchSize() * (1 - researchBonusPct('train_speed')) * (decreeActive('muster') ? 0.7 : 1));
+    const per = { lumber: row.lumber, food: row.grain, water: row.water, fuel: row.oil };
+    let afford = Infinity;
+    Object.keys(per).forEach(k => { if (per[k] > 0) afford = Math.min(afford, Math.floor((state.resources[k] || 0) / per[k])); });
+    return Math.max(1, Math.min(troopBatchSize(), afford));
   }
-  function troopTrainResourceCost(t) {
+  function troopTrainMs(t, size = troopTrainSize(t)) {
     const row = TROOP_ECONOMY_MAP[t.tier];
-    const size = troopBatchSize(); // per-soldier costs above, scaled by the exact batch size
+    return Math.round(row.seconds * 1000 * size * (1 - researchBonusPct('train_speed')) * (decreeActive('muster') ? 0.7 : 1));
+  }
+  function troopTrainResourceCost(t, size = troopTrainSize(t)) {
+    const row = TROOP_ECONOMY_MAP[t.tier];
     return {
       lumber: Math.round(row.lumber * size),
       food: Math.round(row.grain * size),
@@ -6900,7 +6909,7 @@
     const barracksRes = barracksResourceCost();
     const barracksResOk = hasResources(barracksRes);
     document.getElementById('barracksMeta').innerHTML =
-      `Level ${state.barracksLevel} — trains ${troopBatchSize()} troops per batch.<br>` +
+      `Level ${state.barracksLevel} — trains up to ${troopBatchSize()} troops per batch (as many as you can afford).<br>` +
       `<span class="item-req ${barracksResOk ? 'met' : ''}">${barracksResOk ? '✓' : '✗'} ${fmtResourceCost(barracksRes)}</span>`;
     renderTimerRow('barracksTimerRow', 'barracksTimerFill', 'barracksTimerLabel', 'barracks');
     renderTokenUseRow('barracks', 'barracksTokenRow');
@@ -7033,15 +7042,16 @@
           render();
         });
       } else {
-        const ms = troopTrainMs(t);
-        const resCost = troopTrainResourceCost(t);
-        btn.textContent = `Train — ${fmtResourceCost(resCost)}, ${fmtSecs(ms)}`;
+        const size = troopTrainSize(t);
+        const ms = troopTrainMs(t, size);
+        const resCost = troopTrainResourceCost(t, size);
+        btn.textContent = `Train ${size} — ${fmtResourceCost(resCost)}, ${fmtSecs(ms)}`;
         btn.disabled = false;
         btn.addEventListener('click', () => {
           if (!hasResources(resCost)) { showResourceShortfall(resCost); return; }
           spendResources(resCost);
-          startTimer(timerKey, ms, { batch: troopBatchSize(), key: t.key });
-          addLog(`Training a batch of ${troopBatchSize()} ${t.label} — ${fmtSecs(ms)}.`, 'hub', 'building');
+          startTimer(timerKey, ms, { batch: size, key: t.key });
+          addLog(`Training ${size} ${t.label} — ${fmtSecs(ms)}.`, 'hub', 'building');
           render();
         });
       }
