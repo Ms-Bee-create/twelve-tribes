@@ -3477,7 +3477,10 @@
     });
     return max;
   }
-  function resourceCap() { return Math.round((1000 * Math.pow(maxFieldLevelReached(), 1.5)) * (1 + researchBonusPct('warehouse_capacity'))); }
+  // 3000 * level^1.8 (was 1000 * level^1.5): sized so the Storehouse always
+  // holds at least a few full troop batches of the best tier unlocked at that
+  // level (e.g. ~1.2M at level 28 vs a ~355k Tier 6 batch).
+  function resourceCap() { return Math.round((3000 * Math.pow(maxFieldLevelReached(), 1.8)) * (1 + researchBonusPct('warehouse_capacity'))); }
 
   // Every named contribution to powerRating(), in one place, so the power
   // badge's breakdown popup and the actual total can never drift apart —
